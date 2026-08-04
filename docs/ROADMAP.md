@@ -3,7 +3,8 @@
 Built incrementally, one small and defensible change at a time. The scaffold
 already ships the two-tier cascade, the four heuristic guardrails, the offline
 provider, the hash-chained ledger with a cost and latency summary, the shadow
-sampler, and the candidate miner. What follows is the order things get added.
+sampler, the candidate miner, and a command-line interface (`check` over stdin
+and `report` over a ledger file). What follows is the order things get added.
 
 ## Near term
 
@@ -17,8 +18,9 @@ sampler, and the candidate miner. What follows is the order things get added.
 - **Redaction from a real toolkit.** Let tier one delegate to a dedicated
   guardrails library (for example llm-guardrails-toolkit) behind the `Guardrail`
   interface, instead of the built-in patterns.
-- **CLI.** A `guardrail-cascade check` command that reads prompts from stdin and
-  prints decisions, plus `guardrail-cascade report` over a ledger file.
+- **Richer CLI.** The `check` and `report` commands ship now; next add a
+  `--policy` flag once the policy schema below lands, and JSON output for
+  `report` so it feeds a dashboard.
 
 ## Medium term
 

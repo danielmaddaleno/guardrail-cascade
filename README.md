@@ -63,6 +63,32 @@ Run the full offline demo:
 python examples/demo.py
 ```
 
+## Command line
+
+Installing the package puts a `guardrail-cascade` command on your path. It runs
+the same offline cascade, so it needs no credentials.
+
+```bash
+# Screen prompts, one per line from stdin. Exit code is 1 if any is blocked,
+# so it composes in a pipeline.
+$ printf 'what were our top products?\nhere is my key AKIAIOSFODNN7EXAMPLE\n' | guardrail-cascade check
+ALLOW by tier1   (no signal fired)
+BLOCK by tier1   credential-like secret detected
+
+# Persist the evidence ledger, then summarize it. --json emits the scrubbed
+# ledger entry per prompt instead of a one-line verdict.
+$ guardrail-cascade check --ledger run.jsonl < prompts.txt
+$ guardrail-cascade report run.jsonl
+Chain valid:         True
+Requests:            2
+Short-circuit rate:  100%
+Tier-two cost saved: $0.000081
+...
+```
+
+`--single` treats all of stdin as one prompt, and `--block-keyword WORD`
+(repeatable) configures the offline stub that stands in for the paid tier two.
+
 ## What each tier does
 
 Tier one runs cheap, precompiled heuristics and returns one of four actions:
@@ -118,6 +144,7 @@ guardrail_cascade/
   ledger.py       # EvidenceLedger, CostModel, LedgerSummary
   scrub.py        # PII/secret masking applied to every ledger entry
   feedback.py     # CandidateMiner, RuleProposal (human in the loop)
+  cli.py          # `guardrail-cascade check` / `report` command line
 tests/            # unit tests for every module
 examples/demo.py  # end-to-end offline run
 docs/             # ARCHITECTURE.md, ROADMAP.md

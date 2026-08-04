@@ -140,6 +140,24 @@ class EvidenceLedger:
     def entries(self) -> list[dict]:
         return list(self._entries)
 
+    @classmethod
+    def load(cls, path: str) -> "EvidenceLedger":
+        """Load a ledger previously written to a JSON Lines file.
+
+        Each line is restored verbatim, including its ``prev_hash`` and
+        ``entry_hash``, so :meth:`verify` can check the loaded chain and
+        :meth:`summary` can aggregate it. The scrubber is deliberately not
+        re-applied: the records were already scrubbed when first appended, and
+        re-scrubbing would change their bytes and break the chain.
+        """
+        ledger = cls(path=None, scrubber=None)
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if stripped:
+                    ledger._entries.append(json.loads(stripped))
+        return ledger
+
     def verify(self) -> bool:
         """Return True if the whole chain recomputes and links correctly."""
         prev_hash = GENESIS_HASH

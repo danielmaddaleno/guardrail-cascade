@@ -122,6 +122,30 @@ def test_summary_of_empty_ledger_is_zeroed():
     assert summary.latency_p50_ms == 0.0
 
 
+def test_load_round_trips_and_preserves_the_chain(clock, tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    original = EvidenceLedger(path=str(path), now=clock)
+    original.append({"action": "ALLOW", "allowed": True, "decided_by": "tier1"})
+    original.append({"action": "BLOCK", "allowed": False, "decided_by": "tier2"})
+
+    loaded = EvidenceLedger.load(str(path))
+    assert loaded.verify()
+    assert [e["action"] for e in loaded.entries] == ["ALLOW", "BLOCK"]
+    assert loaded.summary().total == 2
+
+
+def test_load_of_a_tampered_file_fails_verify(clock, tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    ledger = EvidenceLedger(path=str(path), now=clock)
+    ledger.append({"action": "BLOCK", "allowed": False})
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    records[0]["allowed"] = True  # flip a hashed field, leave the hash stale
+    path.write_text(json.dumps(records[0]) + "\n")
+
+    assert EvidenceLedger.load(str(path)).verify() is False
+
+
 def test_cost_model_estimate_scales_with_length():
     model = CostModel(price_per_1k_tokens=0.003, chars_per_token=4.0)
     assert model.tokens("a" * 40) == 10
