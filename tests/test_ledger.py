@@ -86,7 +86,9 @@ def test_summary_counts_and_rates(clock):
     assert summary.allowed == 1
     assert summary.blocked_by_tier1 == 1
     assert summary.blocked_by_tier2 == 1
+    assert summary.decided_by_tier1 == 1  # the one tier-one block; the two tier-two entries are not
     assert summary.tier1_block_rate == pytest.approx(1 / 3)
+    assert summary.short_circuit_rate == pytest.approx(1 / 3)
     assert summary.cost_saved == pytest.approx(0.03)
     assert summary.cost_incurred == pytest.approx(0.02)
 
@@ -95,6 +97,7 @@ def test_summary_of_empty_ledger_is_zeroed():
     summary = EvidenceLedger().summary()
     assert summary.total == 0
     assert summary.tier1_block_rate == 0.0
+    assert summary.short_circuit_rate == 0.0
     assert summary.latency_p50_ms == 0.0
 
 

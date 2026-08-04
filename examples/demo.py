@@ -59,7 +59,7 @@ def part_one_cost() -> None:
     print("Blocked by tier 1:   %d" % summary.blocked_by_tier1)
     print("Blocked by tier 2:   %d" % summary.blocked_by_tier2)
     print("Allowed:             %d" % summary.allowed)
-    print("Short-circuit rate:  %.0f%%" % ((summary.blocked_by_tier1 + summary.allowed) / summary.total * 100))
+    print("Short-circuit rate:  %.0f%%" % (summary.short_circuit_rate * 100))
     print("Tier-two cost spent: $%.6f" % summary.cost_incurred)
     print("Tier-two cost saved: $%.6f" % summary.cost_saved)
     print("Ledger chain valid:  %s" % ledger.verify())

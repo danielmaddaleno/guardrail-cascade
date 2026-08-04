@@ -63,5 +63,19 @@ def test_missing_category_falls_back_to_uncategorized():
     assert proposals[0].signal == "uncategorized"
 
 
+def test_block_side_shadow_disagreement_is_not_mined():
+    # A tier-one block whose shadow probe disagreed is a false positive, which
+    # is out of scope for the miner (it proposes rules for misses, not for
+    # over-blocks).
+    entry = {
+        "decided_by": "tier1",
+        "allowed": False,
+        "shadow_agreement": False,
+        "shadow": {"provider": "StubProvider", "action": "ALLOW", "detail": {}},
+        "request_id": "r1",
+    }
+    assert CandidateMiner().mine([entry]) == []
+
+
 def test_empty_ledger_yields_no_proposals():
     assert CandidateMiner().mine([]) == []

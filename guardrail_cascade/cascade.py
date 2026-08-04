@@ -156,12 +156,18 @@ class CascadePolicy:
         allowed = tr1.action == Action.ALLOW
         probe: CheckResult | None = None
         shadow_agreement: bool | None = None
-        if self._should_shadow():
+        # Never forward a sensitive block (a matched secret) to the paid tier,
+        # even for audit: the whole point of the block is to stop it propagating.
+        sensitive = any(r.sensitive for r in tr1.results)
+        if self._should_shadow() and not sensitive:
             probe = self.tier2.check(text)
-            tier2_blocks = probe.action == Action.BLOCK
             # Agreement means tier two would have reached the same call: block a
-            # block, or leave an allow alone.
-            shadow_agreement = tier2_blocks if tr1.action == Action.BLOCK else not tier2_blocks
+            # block, or leave an allow untouched. Any other verdict on an allow
+            # (a REDACT or FLAG) counts as disagreement, a caught tier-one miss.
+            if tr1.action == Action.BLOCK:
+                shadow_agreement = probe.action == Action.BLOCK
+            else:
+                shadow_agreement = probe.action == Action.ALLOW
 
         latency_ms = (self._clock() - start) * 1000.0
         shadowed = probe is not None

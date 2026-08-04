@@ -58,8 +58,10 @@ negatives on allows. `CascadePolicy` can send a configurable fraction of both
 kinds of short-circuit to tier two anyway (off the hot path in production) and
 record whether tier two agreed. A shadow probe is a real, billed tier-two call
 and it never changes the decision, only measures it, so the ledger books it as
-cost incurred, not cost saved. Without this, tier one could drift and nobody
-would notice.
+cost incurred, not cost saved. One exception: a block whose result is marked
+sensitive (a matched secret) is never shadowed, because forwarding the credential
+to the paid tier would defeat the block. Without this sampling, tier one could
+drift and nobody would notice.
 
 ### 3. The improvement loop keeps a human in the middle
 

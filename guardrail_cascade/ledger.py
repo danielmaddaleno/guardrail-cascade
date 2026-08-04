@@ -54,7 +54,9 @@ class LedgerSummary:
     allowed: int
     blocked_by_tier1: int
     blocked_by_tier2: int
+    decided_by_tier1: int
     tier1_block_rate: float
+    short_circuit_rate: float
     cost_incurred: float
     cost_saved: float
     latency_p50_ms: float
@@ -136,13 +138,18 @@ class EvidenceLedger:
         allowed = sum(1 for e in self._entries if e.get("allowed"))
         blocked_t1 = sum(1 for e in self._entries if not e.get("allowed") and e.get("decided_by") == "tier1")
         blocked_t2 = sum(1 for e in self._entries if not e.get("allowed") and e.get("decided_by") == "tier2")
+        # A short-circuit is any request tier one decided on its own (allow or
+        # block), which is what actually skips the paid tier.
+        decided_t1 = sum(1 for e in self._entries if e.get("decided_by") == "tier1")
         latencies = [float(e.get("latency_ms", 0.0)) for e in self._entries]
         return LedgerSummary(
             total=total,
             allowed=allowed,
             blocked_by_tier1=blocked_t1,
             blocked_by_tier2=blocked_t2,
+            decided_by_tier1=decided_t1,
             tier1_block_rate=(blocked_t1 / total if total else 0.0),
+            short_circuit_rate=(decided_t1 / total if total else 0.0),
             cost_incurred=sum(float(e.get("cost_estimate", 0.0)) for e in self._entries),
             cost_saved=sum(float(e.get("cost_saved", 0.0)) for e in self._entries),
             latency_p50_ms=_percentile(latencies, 50),

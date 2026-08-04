@@ -85,7 +85,9 @@ The tradeoff of short-circuiting a confident allow is that a tier-one false
 negative passes without a second opinion. Shadow sampling is the answer: tier
 one sends a configurable fraction of its short-circuits to tier two anyway (off
 the hot path in production) and records whether tier two agreed, which surfaces
-both false positives on blocks and false negatives on allows.
+both false positives on blocks and false negatives on allows. A block flagged
+sensitive (a matched secret) is never shadowed, so the credential is not
+forwarded to the paid tier even for audit.
 
 ## Cost and audit in one place
 

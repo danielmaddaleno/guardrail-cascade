@@ -43,7 +43,9 @@ class CheckResult:
     ``output`` carries the transformed text when ``action`` is ``REDACT`` and is
     ``None`` otherwise. ``detail`` holds structured context (which categories
     fired, how many) but never the raw matched value, so a result is always safe
-    to write to the evidence ledger.
+    to write to the evidence ledger. ``sensitive`` marks a finding whose matched
+    text must not be forwarded anywhere (a live secret, say); the cascade uses it
+    to refuse to shadow-sample such a block to the paid tier.
     """
 
     guardrail: str
@@ -51,6 +53,7 @@ class CheckResult:
     reason: str = ""
     output: str | None = None
     detail: dict = field(default_factory=dict)
+    sensitive: bool = False
 
 
 class Guardrail(ABC):

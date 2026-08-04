@@ -43,6 +43,9 @@ class SecretGuard(Guardrail):
                 action=Action.BLOCK,
                 reason="credential-like secret detected",
                 detail={"kinds": found},
+                # A matched secret must never be forwarded, so this block is
+                # excluded from shadow sampling to the paid tier.
+                sensitive=True,
             )
         return CheckResult(guardrail=self.name, action=Action.ALLOW)
 
