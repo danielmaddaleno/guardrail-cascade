@@ -1,0 +1,111 @@
+# Architecture
+
+## The problem
+
+Every call to an LLM crosses two trust boundaries: the prompt going in and the
+response coming back. Screening both with a strong model-based guardrail on
+every request is accurate but slow and expensive. Screening with cheap
+heuristics alone is fast and free but misses a lot. This project composes the
+two into a cascade so the confident traffic is decided cheaply and the expensive
+tier is reserved for the requests that actually need it.
+
+## The cascade
+
+```
+request
+   |
+   v
+[ tier 1: heuristics ]   cheap, near-zero latency, deterministic
+   |   BLOCK  -> decide here (free); record; optionally shadow-sample to audit
+   |   ALLOW  -> decide here (free); record; optionally shadow-sample to audit
+   |   REDACT -> mask in place and escalate the masked text
+   |   FLAG   -> escalate
+   v
+[ tier 2: model-based provider ]   paid; reached only for FLAG / REDACT (and
+   |                               for shadow-sampled short-circuits)
+   |   BLOCK / ALLOW / REDACT -> final
+   v
+[ evidence ledger ]   append-only, hash-chained; records action, which tier
+                      decided, the guardrail that fired and its detail, latency,
+                      token estimate, and cost incurred/saved
+```
+
+The routing rule is confidence-based: `ALLOW` and `BLOCK` are the confident
+verdicts and short-circuit; `FLAG` and `REDACT` are the ambiguous middle and
+escalate. Savings come from short-circuiting the confident traffic, which in
+typical input is most of it.
+
+## Three decisions that make it defensible
+
+These are the parts an interviewer will poke at. Each is a deliberate choice,
+not an accident.
+
+### 1. Tier one only hard-blocks high-precision signals
+
+A cheap filter that blocks on fuzzy signals will produce false positives, and a
+false positive silently hurts a real user. So tier one blocks only where a match
+is high-precision (structured secrets, the clearest injection phrases), redacts
+where masking is safe (PII), and otherwise `FLAG`s. A `FLAG` never blocks on its
+own; it escalates to tier two. That keeps a noisy keyword rule from quietly
+degrading the product. "High-precision" here is a design goal, not a measured
+number: there is no labeled eval set in the repo yet (see the roadmap).
+
+### 2. Shadow sampling measures what a short-circuit hides
+
+By construction, a request decided at tier one never reaches tier two, so tier
+one's own error rate is invisible: its false positives on blocks and its false
+negatives on allows. `CascadePolicy` can send a configurable fraction of both
+kinds of short-circuit to tier two anyway (off the hot path in production) and
+record whether tier two agreed. A shadow probe is a real, billed tier-two call
+and it never changes the decision, only measures it, so the ledger books it as
+cost incurred, not cost saved. Without this, tier one could drift and nobody
+would notice.
+
+### 3. The improvement loop keeps a human in the middle
+
+Two things say tier one should improve: a request tier two blocked after
+escalation, and a tier-one allow whose shadow probe disagreed. Both are mined
+into ranked proposals for a person to review. The tempting shortcut is to
+synthesize a regex from the example by machine, which overfits and can introduce
+catastrophic backtracking, so a human stays in the loop. A learned tier could
+also be trained on these labels, with one caveat below.
+
+#### Selection bias in the training signal
+
+Escalated catches only describe misses among traffic tier one already flagged,
+not the true input distribution. The shadow-sampled allows are the one source of
+labels on traffic tier one let straight through, so folding them into the miner
+(decision 2 feeding decision 3) is what unbiases the signal. This is why the two
+mechanisms belong together.
+
+## The evidence ledger
+
+Each decision appends one entry. `entry_hash = sha256(prev_hash + canonical_json(fields))`,
+so editing any past field or dropping a line breaks the chain and `verify()`
+returns false. This detects accidental or partial edits. It is not a defense
+against an attacker with full read and write access, who could rewrite an entry
+and recompute every later hash forward: the chain has no external anchor (a
+published head hash or a signature) yet. The `prev_hash` and `entry_hash` keys
+are reserved, so a caller cannot inject them through `append`.
+
+The same entries carry `token_estimate`, `latency_ms`, `cost_estimate`, and
+`cost_saved`, so the ledger is simultaneously the audit trail a governance review
+wants and the observability and cost surface an engineer wants. `summary()` rolls
+it up: block rates per tier, cost incurred versus saved, and latency percentiles.
+
+## Module map
+
+| Module | Responsibility |
+| --- | --- |
+| `core` | `Action`, `CheckResult`, the `Guardrail` interface |
+| `heuristics` | Concrete tier-one guardrails (secrets, injection, PII, toxicity) |
+| `providers` | `Tier2Provider` interface and the offline `StubProvider` |
+| `cascade` | `Tier` combination logic and the `CascadePolicy` orchestrator |
+| `ledger` | `EvidenceLedger`, `CostModel`, `LedgerSummary` |
+| `feedback` | `CandidateMiner`, `RuleProposal` (human-in-the-loop) |
+
+## Non-goals (for now)
+
+This is a single governed serving path, not a platform. It does not try to be an
+LLM gateway across many providers, an agent-orchestration framework, or a
+benchmark suite. See ROADMAP.md for what is added incrementally.

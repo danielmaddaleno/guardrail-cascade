@@ -1,0 +1,4 @@
+# The core package runs on the standard library alone, so there are no runtime
+# dependencies to pin here. Development and test tools live in
+# requirements-dev.txt. A real tier-two provider adapter (for example Bedrock)
+# would add its own optional dependency; see docs/ROADMAP.md.
