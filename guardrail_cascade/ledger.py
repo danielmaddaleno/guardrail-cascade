@@ -8,6 +8,10 @@ attacker with full read and write access, who could rewrite an entry and
 recompute every later hash forward, since the chain has no external anchor yet
 (see the roadmap). Because the same entries also carry token counts, latency and
 cost, the ledger doubles as the observability and FinOps surface.
+
+Every entry is scrubbed before it is hashed and stored (see
+:mod:`guardrail_cascade.scrub`), so PII and secret-shaped values never land in
+the audit log even if a caller leaves one in a field.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
+
+from guardrail_cascade.scrub import scrub
 
 GENESIS_HASH = "0" * 64
 
@@ -80,9 +86,17 @@ class EvidenceLedger:
     tests get deterministic timestamps.
     """
 
-    def __init__(self, path: str | None = None, now: Callable[[], str] = _utc_now_iso):
+    def __init__(
+        self,
+        path: str | None = None,
+        now: Callable[[], str] = _utc_now_iso,
+        scrubber: Callable[[dict], dict] | None = scrub,
+    ):
         self.path = path
         self._now = now
+        # Applied to every entry before it is hashed and stored, so a raw value
+        # a caller left in a field never reaches the log. Pass None to disable.
+        self._scrubber = scrubber
         self._entries: list[dict] = []
 
     @staticmethod
@@ -98,15 +112,20 @@ class EvidenceLedger:
         """Add ``fields`` as the next chained entry and return the full record.
 
         A ``timestamp`` is stamped in if the caller did not supply one. The
-        stored record is ``fields`` plus ``prev_hash`` and ``entry_hash``. Those
-        two keys are reserved: passing them in ``fields`` is rejected, otherwise
-        an entry could be born already failing :meth:`verify`.
+        stored record is ``fields`` (after scrubbing) plus ``prev_hash`` and
+        ``entry_hash``. Those two keys are reserved: passing them in ``fields``
+        is rejected, otherwise an entry could be born already failing
+        :meth:`verify`. The scrubber masks PII and secret-shaped substrings in
+        every string field before the entry is hashed, so a raw value a caller
+        left in ``reason`` or ``detail`` never lands in the log.
         """
         for reserved in ("prev_hash", "entry_hash"):
             if reserved in fields:
                 raise ValueError("%r is a reserved ledger key and cannot be supplied by the caller" % reserved)
         record = dict(fields)
         record.setdefault("timestamp", self._now())
+        if self._scrubber is not None:
+            record = self._scrubber(record)
         prev_hash = self._entries[-1]["entry_hash"] if self._entries else GENESIS_HASH
         entry_hash = self._hash(prev_hash, record)
         record["prev_hash"] = prev_hash

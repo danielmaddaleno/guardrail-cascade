@@ -93,10 +93,12 @@ forwarded to the paid tier even for audit.
 
 The evidence ledger appends one hash-chained entry per request. Each entry
 records the action, which tier decided, which guardrail fired and its structured
-detail, a token estimate, latency, and the cost incurred or saved. That makes it
-both the audit trail a governance review asks for and the observability and
-FinOps surface an engineer wants. `summary()` reports the short-circuit rate and
-the tier-two spend it avoided.
+detail, a token estimate, latency, and the cost incurred or saved. Every entry is
+scrubbed before it is stored, so PII and secret-shaped values never land in the
+audit log even if a custom guardrail or provider leaves one in a field. That
+makes it both the audit trail a governance review asks for and the observability
+and FinOps surface an engineer wants. `summary()` reports the short-circuit rate
+and the tier-two spend it avoided.
 
 The improvement loop closes it: `CandidateMiner` groups the misses (requests
 tier two blocked after escalation, plus tier-one allows a shadow probe
@@ -114,6 +116,7 @@ guardrail_cascade/
   providers.py    # Tier2Provider interface + offline StubProvider
   cascade.py      # Tier combination + CascadePolicy orchestrator
   ledger.py       # EvidenceLedger, CostModel, LedgerSummary
+  scrub.py        # PII/secret masking applied to every ledger entry
   feedback.py     # CandidateMiner, RuleProposal (human in the loop)
 tests/            # unit tests for every module
 examples/demo.py  # end-to-end offline run

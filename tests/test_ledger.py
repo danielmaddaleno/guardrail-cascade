@@ -48,6 +48,27 @@ def test_removing_an_entry_breaks_the_chain(clock):
     assert not ledger.verify()
 
 
+def test_append_masks_pii_and_secrets_before_storing(clock):
+    ledger = EvidenceLedger(now=clock)
+    entry = ledger.append(
+        {
+            "reason": "blocked because john@doe.com appeared",
+            "detail": {"note": "saw key AKIAIOSFODNN7EXAMPLE"},
+            "allowed": False,
+        }
+    )
+    assert entry["reason"] == "blocked because [EMAIL] appeared"
+    assert entry["detail"]["note"] == "saw key [SECRET]"
+    # The scrubbed content is what got hashed, so the chain still verifies.
+    assert ledger.verify()
+
+
+def test_scrubbing_can_be_disabled(clock):
+    ledger = EvidenceLedger(now=clock, scrubber=None)
+    entry = ledger.append({"reason": "raw a@b.com", "allowed": True})
+    assert entry["reason"] == "raw a@b.com"
+
+
 def test_append_rejects_reserved_keys(clock):
     ledger = EvidenceLedger(now=clock)
     with pytest.raises(ValueError):

@@ -226,6 +226,17 @@ def test_ledger_records_the_firing_guardrail_and_its_detail(tier1):
     assert tier2_entry["detail"]["StubProvider"]["category"] == "malware"
 
 
+def test_ledger_masks_pii_a_provider_leaks_into_its_reason(tier1):
+    ledger = EvidenceLedger()
+    # A careless provider that echoes a raw address in its reason.
+    provider = RecordingProvider(action=Action.BLOCK, reason="blocked, saw john@doe.com")
+    policy = CascadePolicy(tier1, provider, ledger, clock=make_clock())
+    policy.evaluate("that was a racist joke", request_id="r1")  # toxicity FLAG escalates to tier2
+    entry = ledger.entries[0]
+    assert "john@doe.com" not in entry["reason"]
+    assert "[EMAIL]" in entry["reason"]
+
+
 def test_each_evaluate_writes_one_ledger_entry(tier1):
     ledger = EvidenceLedger()
     policy = CascadePolicy(tier1, StubProvider(block_keywords=["malware"]), ledger, clock=make_clock())

@@ -17,6 +17,7 @@ from guardrail_cascade.heuristics import (
 )
 from guardrail_cascade.ledger import CostModel, EvidenceLedger, LedgerSummary
 from guardrail_cascade.providers import StubProvider, Tier2Provider
+from guardrail_cascade.scrub import scrub
 
 __all__ = [
     "Action",
@@ -37,6 +38,7 @@ __all__ = [
     "ToxicityGuard",
     "CandidateMiner",
     "RuleProposal",
+    "scrub",
 ]
 
 __version__ = "0.1.0"

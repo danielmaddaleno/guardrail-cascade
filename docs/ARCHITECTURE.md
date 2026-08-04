@@ -95,6 +95,14 @@ The same entries carry `token_estimate`, `latency_ms`, `cost_estimate`, and
 wants and the observability and cost surface an engineer wants. `summary()` rolls
 it up: block rates per tier, cost incurred versus saved, and latency percentiles.
 
+Before an entry is hashed and stored, it is scrubbed (`guardrail_cascade.scrub`):
+PII and secret-shaped substrings in every string field are masked. The built-in
+guardrails only put labels in a result, never raw values, but a custom guardrail
+or a real tier-two provider could return the offending span, so the ledger masks
+defensively rather than trusting its callers. The scrubber is independent of the
+detection heuristics on purpose: the log must be safe even when no PII guardrail
+is configured.
+
 ## Module map
 
 | Module | Responsibility |
@@ -104,6 +112,7 @@ it up: block rates per tier, cost incurred versus saved, and latency percentiles
 | `providers` | `Tier2Provider` interface and the offline `StubProvider` |
 | `cascade` | `Tier` combination logic and the `CascadePolicy` orchestrator |
 | `ledger` | `EvidenceLedger`, `CostModel`, `LedgerSummary` |
+| `scrub` | PII and secret masking applied to every ledger entry |
 | `feedback` | `CandidateMiner`, `RuleProposal` (human-in-the-loop) |
 
 ## Non-goals (for now)
