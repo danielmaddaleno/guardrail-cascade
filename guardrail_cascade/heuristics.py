@@ -24,11 +24,19 @@ class SecretGuard(Guardrail):
     Targets structured, prefixed secrets whose format is fixed, so a match is
     high confidence. The matched value is never returned in the result, so the
     guard does not become a second place the secret leaks.
+
+    These shapes are kept in step with the secret patterns in
+    :mod:`guardrail_cascade.scrub`. The scrubber is the last line for the audit
+    log, but it only runs once an entry is being written: a key shape it knows
+    and this guard does not is one that gets forwarded to the paid tier before
+    anything masks it.
     """
 
     PATTERNS = {
         "aws_access_key_id": r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
         "github_token": r"\bgh[oprsu]_[A-Za-z0-9]{36,}\b",
+        "openai_api_key": r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b",
+        "google_api_key": r"\bAIza[0-9A-Za-z_-]{35}\b",
         "private_key": r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
     }
 

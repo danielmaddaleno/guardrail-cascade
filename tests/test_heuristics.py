@@ -4,6 +4,7 @@ import pytest
 
 from guardrail_cascade.core import Action
 from guardrail_cascade.heuristics import PIIGuard, PromptInjectionGuard, SecretGuard, ToxicityGuard
+from guardrail_cascade.scrub import scrub_text
 
 
 class TestSecretGuard:
@@ -23,6 +24,23 @@ class TestSecretGuard:
         result = guard.check("ghp_" + "a" * 36)
         assert result.action is Action.BLOCK
         assert result.detail["kinds"] == ["github_token"]
+
+    def test_blocks_openai_api_key(self, guard):
+        result = guard.check("sk-proj-" + "a" * 24)
+        assert result.action is Action.BLOCK
+        assert result.detail["kinds"] == ["openai_api_key"]
+
+    def test_blocks_google_api_key(self, guard):
+        result = guard.check("AIza" + "B" * 35)
+        assert result.action is Action.BLOCK
+        assert result.detail["kinds"] == ["google_api_key"]
+
+    def test_blocks_every_key_shape_the_ledger_scrubber_masks(self, guard):
+        # The scrubber masking a shape this guard allows means the value already
+        # reached the paid tier before anything masked it.
+        for secret in ("AKIAIOSFODNN7EXAMPLE", "ghp_" + "a" * 36, "sk-proj-" + "a" * 24, "AIza" + "B" * 35):
+            assert scrub_text(secret) == "[SECRET]"
+            assert guard.check(secret).action is Action.BLOCK
 
     def test_blocks_private_key_header(self, guard):
         result = guard.check("-----BEGIN RSA PRIVATE KEY-----")
