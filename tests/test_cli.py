@@ -93,6 +93,24 @@ def test_report_detects_a_tampered_ledger(monkeypatch, tmp_path):
     assert "Chain valid:         False" in out
 
 
+def test_report_on_missing_file_is_a_clean_error_not_a_traceback(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    code = cli.main(["report", "no-such-ledger.jsonl"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "not found" in err
+    assert "no-such-ledger.jsonl" in err
+
+
+def test_report_on_corrupt_ledger_is_a_clean_error(monkeypatch, capsys, tmp_path):
+    path = tmp_path / "bad.jsonl"
+    path.write_text("this line is not valid json\n")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    code = cli.main(["report", str(path)])
+    assert code == 2
+    assert "could not read ledger" in capsys.readouterr().err
+
+
 def test_no_subcommand_prints_help_and_returns_two(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     code = cli.main([])

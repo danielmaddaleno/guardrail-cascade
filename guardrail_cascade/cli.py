@@ -16,8 +16,9 @@ hash chain, and prints the aggregate summary.
 
 The default tier two is the offline stub, so nothing reaches the network; a real
 deployment wires a model-based provider in code (see docs/ROADMAP.md). ``check``
-exits 1 if any prompt was blocked, so it composes in a shell pipeline, and
-``report`` exits 1 if the loaded ledger chain does not verify.
+exits 1 if any prompt was blocked, so it composes in a shell pipeline;
+``report`` exits 1 if the loaded ledger chain does not verify, and 2 if the file
+is missing or cannot be parsed as a ledger.
 """
 
 from __future__ import annotations
@@ -70,7 +71,17 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
 
 
 def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
-    ledger = EvidenceLedger.load(args.ledger_file)
+    try:
+        ledger = EvidenceLedger.load(args.ledger_file)
+    except FileNotFoundError:
+        sys.stderr.write(
+            "report: ledger file not found: %s\n"
+            "Write one first with `check --ledger %s`.\n" % (args.ledger_file, args.ledger_file)
+        )
+        return 2
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.stderr.write("report: could not read ledger %s: %s\n" % (args.ledger_file, exc))
+        return 2
     ok = ledger.verify()
     summary = ledger.summary()
     lines = [
