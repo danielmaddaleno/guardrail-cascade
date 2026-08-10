@@ -37,6 +37,12 @@ def test_scrub_walks_nested_structures():
     assert scrubbed["items"] == ["ping [PHONE]", "clean"]
 
 
+def test_scrub_walks_tuples_and_keeps_the_type():
+    scrubbed = scrub(("mail a@b.com", "clean", {"note": "key AKIAIOSFODNN7EXAMPLE"}))
+    assert isinstance(scrubbed, tuple)
+    assert scrubbed == ("mail [EMAIL]", "clean", {"note": "key [SECRET]"})
+
+
 def test_scrub_leaves_non_strings_intact():
     value = {"count": 3, "rate": 0.5, "ok": True, "missing": None}
     assert scrub(value) == value

@@ -42,8 +42,10 @@ def scrub_text(text: str) -> str:
 def scrub(value: Any) -> Any:
     """Recursively mask strings inside a value, leaving structure and numbers intact.
 
-    Dicts and lists are walked; strings are masked; everything else (numbers,
-    booleans, ``None``) is returned unchanged.
+    Dicts, lists, and tuples are walked; strings are masked; everything else
+    (numbers, booleans, ``None``) is returned unchanged. Tuples keep their type
+    so a secret tucked inside one is masked instead of slipping through the net
+    the way it would if only dicts and lists were walked.
     """
     if isinstance(value, str):
         return scrub_text(value)
@@ -51,4 +53,6 @@ def scrub(value: Any) -> Any:
         return {key: scrub(item) for key, item in value.items()}
     if isinstance(value, list):
         return [scrub(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(scrub(item) for item in value)
     return value
