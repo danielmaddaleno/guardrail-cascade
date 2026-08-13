@@ -34,13 +34,18 @@ class RuleProposal:
 
 
 def _category(entry: dict) -> str:
-    """Pull the tier-two category out of an entry's detail or shadow record."""
+    """Pull the tier-two category out of an entry's detail or shadow record.
+
+    A missing category, and an explicit null or empty one, both fall back to
+    "uncategorized" so a provider that reports ``{"category": None}`` does not
+    open a stray "None" bucket alongside the real ones.
+    """
     sources = list(entry.get("detail", {}).values())
     shadow = entry.get("shadow")
     if isinstance(shadow, dict) and isinstance(shadow.get("detail"), dict):
         sources.append(shadow["detail"])
     for value in sources:
-        if isinstance(value, dict) and "category" in value:
+        if isinstance(value, dict) and value.get("category"):
             return str(value["category"])
     return "uncategorized"
 
