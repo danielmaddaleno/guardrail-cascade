@@ -103,6 +103,19 @@ class TestPIIGuard:
         assert result.action is Action.REDACT
         assert "[SSN]" in result.output
 
+    def test_redacts_card(self, guard):
+        result = guard.check("pay with 4111 1111 1111 1111 today")
+        assert result.action is Action.REDACT
+        assert result.output == "pay with [CARD] today"
+        assert result.detail["labels"] == ["CARD"]
+
+    def test_masks_the_card_shape_the_ledger_scrubber_masks(self, guard):
+        # A card the scrubber masks but this guard forwards would reach the paid
+        # tier in the clear, so the two have to agree on the card shape.
+        card = "4111-1111-1111-1111"
+        assert scrub_text(card) == "[CARD]"
+        assert "[CARD]" in guard.check("card " + card).output
+
     def test_reports_every_label_it_masked(self, guard):
         result = guard.check("mail a@b.com or call 555-123-4567")
         assert set(result.detail["labels"]) == {"EMAIL", "PHONE"}
