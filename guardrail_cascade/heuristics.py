@@ -89,12 +89,19 @@ class PromptInjectionGuard(Guardrail):
 
 
 class PIIGuard(Guardrail):
-    """REDACT common PII in place and forward the masked text."""
+    """REDACT common PII in place and forward the masked text.
+
+    The card shape is kept in step with the ledger scrubber in
+    :mod:`guardrail_cascade.scrub`. If this guard masked less than the scrubber,
+    a card number would ride along to the paid tier before anything hid it, and
+    only get masked once the entry was written to the log.
+    """
 
     PATTERNS = {
         "EMAIL": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         "PHONE": r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
         "SSN": r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b",
+        "CARD": r"\b(?:\d{4}[-.\s]?){3}\d{4}\b",
     }
 
     def __init__(self) -> None:
