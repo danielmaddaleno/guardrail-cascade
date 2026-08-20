@@ -123,3 +123,114 @@ def test_single_flag_treats_all_stdin_as_one_prompt(monkeypatch):
     code, out = run(["check", "--single"], "one\ntwo\n", monkeypatch)
     assert code == 0
     assert out.count("\n") == 1
+
+
+def write_policy(tmp_path, **overrides):
+    """Write a valid policy file, with field overrides, and return its path."""
+    data = {
+        "name": "test-policy",
+        "version": "1",
+        "guardrails": ["SecretGuard", "PromptInjectionGuard", "PIIGuard", "ToxicityGuard"],
+        "shadow_sample_rate": 0.1,
+        "block_keywords": ["malware"],
+    }
+    data.update(overrides)
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(data))
+    return str(path)
+
+
+def test_check_builds_the_cascade_from_a_policy_file(monkeypatch, tmp_path):
+    # The policy's own block keyword drives the tier-two stub: the toxicity
+    # FLAG escalates and the policy-configured keyword makes tier two block.
+    path = write_policy(tmp_path)
+    code, out = run(["check", "--policy", path], "kill them and deploy the malware", monkeypatch)
+    assert code == 1
+    assert "BLOCK by tier2" in out
+
+
+def test_check_rejects_an_invalid_policy_with_exit_two(monkeypatch, tmp_path, capsys):
+    path = write_policy(tmp_path, shadow_sample_rate=5.0)
+    code, _ = run(["check", "--policy", path], "anything", monkeypatch)
+    assert code == 2
+    assert "shadow_sample_rate" in capsys.readouterr().err
+
+
+def test_lint_passes_a_full_policy(monkeypatch, tmp_path):
+    code, out = run(["lint", write_policy(tmp_path)], "", monkeypatch)
+    assert code == 0
+    assert out.startswith("OK:")
+
+
+def test_lint_fails_when_a_required_control_is_missing(monkeypatch, tmp_path):
+    path = write_policy(tmp_path, shadow_sample_rate=0.0)
+    code, out = run(["lint", path], "", monkeypatch)
+    assert code == 1
+    assert "drift-monitoring" in out
+
+
+def test_lint_with_narrowed_requirements_accepts_the_gap(monkeypatch, tmp_path):
+    path = write_policy(tmp_path, shadow_sample_rate=0.0)
+    code, out = run(["lint", path, "--require", "input-screening", "--require", "audit-trail"], "", monkeypatch)
+    assert code == 0
+    assert "2 required control(s)" in out
+
+
+def test_lint_fails_on_an_unreadable_policy_file(monkeypatch, tmp_path):
+    code, out = run(["lint", str(tmp_path / "missing.json")], "", monkeypatch)
+    assert code == 1
+    assert out.startswith("FAIL:")
+
+
+def test_lint_with_ledger_fails_on_a_tampered_chain(monkeypatch, tmp_path):
+    ledger_path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(ledger_path)], "a harmless question", monkeypatch)
+    records = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    records[0]["allowed"] = False
+    ledger_path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+    code, out = run(["lint", write_policy(tmp_path), "--ledger", str(ledger_path)], "", monkeypatch)
+    assert code == 1
+    assert "audit-trail" in out
+
+
+def test_card_prints_a_design_time_card_by_default(monkeypatch, tmp_path):
+    code, out = run(["card", "--policy", write_policy(tmp_path)], "", monkeypatch)
+    assert code == 0
+    assert out.startswith("# System card: test-policy")
+    assert "design-time card" in out
+
+
+def test_card_with_ledger_reports_evidence_and_writes_a_file(monkeypatch, tmp_path):
+    ledger_path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(ledger_path)], "here is my key AKIAIOSFODNN7EXAMPLE", monkeypatch)
+
+    out_path = tmp_path / "CARD.md"
+    args = ["card", "--policy", write_policy(tmp_path), "--ledger", str(ledger_path), "-o", str(out_path)]
+    code, out = run(args, "", monkeypatch)
+    assert code == 0
+    assert "Wrote system card to" in out
+    card = out_path.read_text()
+    assert "| Requests recorded | 1 |" in card
+    assert "AKIAIOSFODNN7EXAMPLE" not in card  # evidence stays scrubbed end to end
+
+
+def test_card_exits_one_over_a_tampered_ledger(monkeypatch, tmp_path):
+    ledger_path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(ledger_path)], "a harmless question", monkeypatch)
+    records = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    records[0]["allowed"] = False
+    ledger_path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+    code, out = run(["card", "--ledger", str(ledger_path)], "", monkeypatch)
+    assert code == 1
+    assert "| Ledger chain verifies | False |" in out
+
+
+def test_report_includes_shadow_metrics(monkeypatch, tmp_path):
+    path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(path)], "a harmless question", monkeypatch)
+    code, out = run(["report", str(path)], "", monkeypatch)
+    assert code == 0
+    assert "Shadow probes:       0" in out
+    assert "Shadow agreement:    n/a" in out

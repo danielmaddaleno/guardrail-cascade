@@ -89,6 +89,21 @@ Tier-two cost saved: $0.000081
 `--single` treats all of stdin as one prompt, and `--block-keyword WORD`
 (repeatable) configures the offline stub that stands in for the paid tier two.
 
+The governance layer is on the command line too:
+
+```bash
+# Build the cascade from a reviewed policy file instead of the defaults.
+$ guardrail-cascade check --policy examples/policy.json < prompts.txt
+
+# The governance gate: exit 1 when the policy is invalid or misses a required
+# control, so a CI build fails the way it fails on a broken test.
+$ guardrail-cascade lint examples/policy.json
+OK: policy 'default-serving' v1 satisfies all 7 required control(s)
+
+# Render policy + ledger evidence into a Markdown system card.
+$ guardrail-cascade card --policy examples/policy.json --ledger run.jsonl -o CARD.md
+```
+
 ## What each tier does
 
 Tier one runs cheap, precompiled heuristics and returns one of four actions:
@@ -133,6 +148,37 @@ rules automatically. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why a
 human stays in the loop and how shadow sampling counters the selection bias in
 that signal.
 
+## Governance: policy as code and the system card
+
+The deployed configuration is itself a reviewable artifact. `PolicySpec` loads
+the tier-one lineup, the shadow rate and the price model from a JSON file (or
+YAML with the optional `[yaml]` extra), validates it (an unknown field is an
+error, not a silent no-op) and builds the whole cascade from it, so what runs
+is what was reviewed and versioned:
+
+```python
+from guardrail_cascade import PolicySpec, lint_policy, system_card, EvidenceLedger
+
+spec = PolicySpec.from_file("examples/policy.json")
+ledger = EvidenceLedger()
+policy = spec.build(ledger=ledger)   # runnable as-is: offline stub tier two
+
+assert lint_policy(spec) == []       # every cataloged control is satisfied
+print(system_card(spec, ledger))     # Markdown system card, policy + evidence
+```
+
+Every mechanism in the cascade is cataloged as a named control
+(`CONTROL_CATALOG`) and crosswalked to NIST AI RMF functions, ISO/IEC 42001
+clauses and EU AI Act articles, so one implementation answers a review in the
+language of each framework. `lint_policy` is the governance gate: it fails when
+the policy is invalid or drops a required control, and this repo's own CI runs
+it over `examples/policy.json`, so governance is enforced the way tests are.
+`system_card` renders the policy plus the ledger's recorded evidence (rates,
+costs, shadow agreement, chain validity) into a Markdown card, so the document
+a review asks for is generated from the deployed truth instead of hand-written
+and stale. The crosswalk is a documentation aid, not a certification claim, and
+the card says so itself.
+
 ## Project structure
 
 ```
@@ -144,9 +190,12 @@ guardrail_cascade/
   ledger.py       # EvidenceLedger, CostModel, LedgerSummary
   scrub.py        # PII/secret masking applied to every ledger entry
   feedback.py     # CandidateMiner, RuleProposal (human in the loop)
-  cli.py          # `guardrail-cascade check` / `report` command line
+  policy.py       # PolicySpec: the deployed configuration as a reviewable file
+  governance.py   # control catalog, framework crosswalk, lint gate, system card
+  cli.py          # `check` / `report` / `lint` / `card` command line
 tests/            # unit tests for every module
 examples/demo.py  # end-to-end offline run
+examples/policy.json  # the reviewed policy the CI governance gate lints
 docs/             # ARCHITECTURE.md, ROADMAP.md
 ```
 
@@ -187,8 +236,8 @@ which is close enough for accounting but is not an exact tokenizer count.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md). Highlights: provider adapters (Bedrock,
 Llama Guard), async off-path shadow sampling, a signed or published ledger head
-hash, a ledger report renderer, a typed policy schema, and a learned tier 1.5
-trained on tier-two labels plus shadow-sampled allows.
+hash, a ledger report renderer, and a learned tier 1.5 trained on tier-two
+labels plus shadow-sampled allows.
 
 ## License
 

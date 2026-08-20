@@ -18,3 +18,16 @@ jobs:
       - run: black --check .
       - run: flake8 . --max-line-length=120
       - run: mypy guardrail_cascade --ignore-missing-imports
+
+  # The governance gate the roadmap promised: the build fails when the example
+  # policy is invalid or drops a required control, the same way it fails on a
+  # broken test.
+  policy-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - run: guardrail-cascade lint examples/policy.json

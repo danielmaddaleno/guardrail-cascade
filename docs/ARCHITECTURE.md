@@ -103,6 +103,47 @@ defensively rather than trusting its callers. The scrubber is independent of the
 detection heuristics on purpose: the log must be safe even when no PII guardrail
 is configured.
 
+## The governance layer
+
+The cascade's mechanisms only count as *controls* when a reviewer can check
+they are deployed and see the evidence they ran. Two modules turn the
+mechanisms into exactly that:
+
+**Policy as code (`policy`).** `PolicySpec` is the deployed configuration
+(which guardrails run, the shadow rate, the price model) as one typed object
+loadable from a JSON (or YAML) file. The schema is closed: an unknown key is an
+error, because a typo like `shadow_smaple_rate` silently disabling sampling is
+the exact failure a reviewed policy exists to prevent. `spec.build()` wires the
+whole cascade from the file and refuses an invalid spec, so the reviewed
+artifact and the running configuration cannot quietly diverge.
+
+**Controls, crosswalk, and evidence (`governance`).** `CONTROL_CATALOG` names
+the seven controls the cascade implements (input screening, secret
+containment, PII redaction, the audit trail, log scrubbing, drift monitoring,
+human oversight) and crosswalks each to NIST AI RMF functions, ISO/IEC 42001
+clauses, and EU AI Act articles. The crosswalk is deliberately coarse (function
+and clause level) because a wrong subcategory number is worse than a right
+coarse one; it is a documentation aid, not a certification claim.
+`assess_controls` judges a policy against the catalog, and a supplied ledger
+both enriches the evidence (probes sent, agreement observed) and can *fail* a
+structural control: a ledger whose hash chain does not verify fails
+`audit-trail` even though the ledger exists.
+
+Two consumers close the loop:
+
+- **`lint_policy` is the CI gate.** A build fails when the policy is invalid
+  or a required control is unsatisfied, the same way it fails on a broken
+  test. This repo's own CI lints `examples/policy.json`. Narrowing the
+  required set is possible but explicit, so accepting a gap is a reviewable
+  decision, not an omission.
+- **`system_card` is the generated document.** Policy plus ledger render into
+  a Markdown system card: the deployed configuration, the control table with
+  its crosswalk and per-control evidence, and the operational numbers
+  (short-circuit rate, cost, latency, shadow agreement, chain validity). A
+  generated card cannot drift from reality the way a hand-written one does,
+  and it inherits the ledger's scrubbing, so no raw traffic value can leak
+  into the published document.
+
 ## Module map
 
 | Module | Responsibility |
@@ -114,6 +155,8 @@ is configured.
 | `ledger` | `EvidenceLedger`, `CostModel`, `LedgerSummary` |
 | `scrub` | PII and secret masking applied to every ledger entry |
 | `feedback` | `CandidateMiner`, `RuleProposal` (human-in-the-loop) |
+| `policy` | `PolicySpec`: the deployed configuration as a validated, reviewable file |
+| `governance` | Control catalog, framework crosswalk, `lint_policy` gate, `system_card` |
 
 ## Non-goals (for now)
 

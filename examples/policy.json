@@ -1,0 +1,9 @@
+{
+  "name": "default-serving",
+  "version": "1",
+  "guardrails": ["SecretGuard", "PromptInjectionGuard", "PIIGuard", "ToxicityGuard"],
+  "shadow_sample_rate": 0.1,
+  "block_keywords": ["malware", "weapon"],
+  "price_per_1k_tokens": 0.003,
+  "chars_per_token": 4.0
+}

@@ -67,6 +67,13 @@ class LedgerSummary:
     cost_saved: float
     latency_p50_ms: float
     latency_p95_ms: float
+    # Shadow sampling is the audit on tier one's short-circuits, so its
+    # agreement rate is the drift signal a governance review asks for. The rate
+    # is over probes actually sent, not over all requests, and is 0.0 when no
+    # probe ran (check ``shadow_probes`` to tell "no data" from "no agreement").
+    shadow_probes: int = 0
+    shadow_agreements: int = 0
+    shadow_agreement_rate: float = 0.0
 
 
 def _percentile(values: list[float], pct: float) -> float:
@@ -179,6 +186,10 @@ class EvidenceLedger:
         # block), which is what actually skips the paid tier.
         decided_t1 = sum(1 for e in self._entries if e.get("decided_by") == "tier1")
         latencies = [float(e.get("latency_ms", 0.0)) for e in self._entries]
+        # A probe happened wherever agreement was recorded at all; True/False is
+        # the verdict, None (or the key missing) means no probe was sent.
+        probes = sum(1 for e in self._entries if e.get("shadow_agreement") is not None)
+        agreements = sum(1 for e in self._entries if e.get("shadow_agreement") is True)
         return LedgerSummary(
             total=total,
             allowed=allowed,
@@ -191,4 +202,7 @@ class EvidenceLedger:
             cost_saved=sum(float(e.get("cost_saved", 0.0)) for e in self._entries),
             latency_p50_ms=_percentile(latencies, 50),
             latency_p95_ms=_percentile(latencies, 95),
+            shadow_probes=probes,
+            shadow_agreements=agreements,
+            shadow_agreement_rate=(agreements / probes if probes else 0.0),
         )
