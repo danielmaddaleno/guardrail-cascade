@@ -234,3 +234,24 @@ def test_report_includes_shadow_metrics(monkeypatch, tmp_path):
     assert code == 0
     assert "Shadow probes:       0" in out
     assert "Shadow agreement:    n/a" in out
+
+
+def test_two_check_runs_share_one_verifiable_ledger(monkeypatch, tmp_path):
+    path = tmp_path / "run.jsonl"
+    stdin = "a harmless question\nhere is my key AKIAIOSFODNN7EXAMPLE\n"
+    run(["check", "--ledger", str(path)], stdin, monkeypatch)
+    run(["check", "--ledger", str(path)], stdin, monkeypatch)
+
+    code, out = run(["report", str(path)], "", monkeypatch)
+    assert code == 0
+    assert "Chain valid:         True" in out
+    assert "Requests:            4" in out
+
+
+def test_check_on_a_corrupt_ledger_file_is_a_clean_error(monkeypatch, capsys, tmp_path):
+    path = tmp_path / "bad.jsonl"
+    path.write_text("this line is not valid json\n")
+    monkeypatch.setattr("sys.stdin", io.StringIO("a harmless question\n"))
+    code = cli.main(["check", "--ledger", str(path)])
+    assert code == 2
+    assert "ledger error" in capsys.readouterr().err

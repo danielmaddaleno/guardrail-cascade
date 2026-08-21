@@ -13,9 +13,10 @@ Four subcommands, all offline and credential-free so they run anywhere:
 ``check`` reads one prompt per line from stdin (or the whole input as a single
 prompt with ``--single``), runs tier one against an offline stub tier two,
 prints one decision per prompt, and can persist the evidence ledger to a JSON
-Lines file. With ``--policy`` the cascade is built from a reviewed policy file
-instead of the built-in defaults. ``report`` loads a ledger file, verifies the
-hash chain, and prints the aggregate summary. ``lint`` is the CI gate: it exits
+Lines file, extending the chain of one that is already there. With ``--policy``
+the cascade is built from a reviewed policy file instead of the built-in
+defaults. ``report`` loads a ledger file, verifies the hash chain, and prints
+the aggregate summary. ``lint`` is the CI gate: it exits
 1 when the policy is invalid or a required governance control is not satisfied,
 so a build fails the way it fails on a broken test. ``card`` renders the policy
 (and optionally a ledger) into a Markdown system card.
@@ -85,7 +86,12 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     # require editing the reviewed file.
     keywords = list(spec.block_keywords) + (args.block_keyword or [])
     tier2 = StubProvider(block_keywords=keywords)
-    ledger = EvidenceLedger(path=args.ledger)
+    try:
+        # An existing ledger file is read back so this run extends its chain.
+        ledger = EvidenceLedger(path=args.ledger)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("ledger error: %s\n" % exc)
+        return 2
     policy = spec.build(tier2=tier2, ledger=ledger)
 
     blocked_any = False

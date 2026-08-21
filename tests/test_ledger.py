@@ -151,3 +151,38 @@ def test_cost_model_estimate_scales_with_length():
     assert model.tokens("a" * 40) == 10
     assert model.estimate("a" * 40) == pytest.approx(10 / 1000 * 0.003)
     assert model.estimate("") == 0.0
+
+
+def test_reopening_the_file_continues_the_chain(clock, tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = EvidenceLedger(path=str(path), now=clock)
+    first.append({"action": "ALLOW", "allowed": True})
+
+    second = EvidenceLedger(path=str(path), now=clock)
+    entry = second.append({"action": "BLOCK", "allowed": False})
+    assert entry["prev_hash"] == first.entries[-1]["entry_hash"]
+    assert second.verify()
+    assert EvidenceLedger.load(str(path)).verify()
+    assert len(path.read_text(encoding="utf-8").strip().splitlines()) == 2
+
+
+def test_a_loaded_ledger_can_keep_appending(clock, tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    original = EvidenceLedger(path=str(path), now=clock)
+    original.append({"action": "ALLOW", "allowed": True})
+
+    loaded = EvidenceLedger.load(str(path))
+    loaded.append({"action": "BLOCK", "allowed": False})
+    assert loaded.verify()
+    assert EvidenceLedger.load(str(path)).summary().total == 2
+
+
+def test_a_missing_path_starts_an_empty_ledger(tmp_path, clock):
+    ledger = EvidenceLedger(path=str(tmp_path / "not-written-yet.jsonl"), now=clock)
+    assert ledger.entries == []
+    assert ledger.append({"allowed": True})["prev_hash"] == GENESIS_HASH
+
+
+def test_load_still_raises_on_a_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        EvidenceLedger.load(str(tmp_path / "no-such-ledger.jsonl"))

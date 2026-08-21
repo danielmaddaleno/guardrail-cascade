@@ -76,7 +76,8 @@ ALLOW by tier1   (no signal fired)
 BLOCK by tier1   credential-like secret detected
 
 # Persist the evidence ledger, then summarize it. --json emits the scrubbed
-# ledger entry per prompt instead of a one-line verdict.
+# ledger entry per prompt instead of a one-line verdict. Pointing --ledger at a
+# file that already exists extends its chain, so the whole file still verifies.
 $ guardrail-cascade check --ledger run.jsonl < prompts.txt
 $ guardrail-cascade report run.jsonl
 Chain valid:         True

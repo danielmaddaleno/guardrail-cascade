@@ -88,7 +88,9 @@ returns false. This detects accidental or partial edits. It is not a defense
 against an attacker with full read and write access, who could rewrite an entry
 and recompute every later hash forward: the chain has no external anchor (a
 published head hash or a signature) yet. The `prev_hash` and `entry_hash` keys
-are reserved, so a caller cannot inject them through `append`.
+are reserved, so a caller cannot inject them through `append`. A ledger opened
+over a JSON Lines file that already exists reads it back first, so the next
+append continues that chain rather than starting a second one in the same file.
 
 The same entries carry `token_estimate`, `latency_ms`, `cost_estimate`, and
 `cost_saved`, so the ledger is simultaneously the audit trail a governance review

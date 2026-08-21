@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
@@ -26,6 +27,12 @@ from typing import Callable
 from guardrail_cascade.scrub import scrub
 
 GENESIS_HASH = "0" * 64
+
+
+def _read_entries(path: str) -> list[dict]:
+    """Read a JSON Lines ledger file back into its records, verbatim."""
+    with open(path, encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
 
 
 def _utc_now_iso() -> str:
@@ -89,8 +96,10 @@ class EvidenceLedger:
     """Append-only, hash-chained log of cascade decisions.
 
     Entries are kept in memory and, when ``path`` is given, also appended to a
-    JSON Lines file so the chain survives a restart. ``now`` is injectable so
-    tests get deterministic timestamps.
+    JSON Lines file so the chain survives a restart. If that file already
+    exists, its entries are read back at construction time and the next
+    :meth:`append` continues their chain instead of restarting from the genesis
+    hash. ``now`` is injectable so tests get deterministic timestamps.
     """
 
     def __init__(
@@ -105,6 +114,10 @@ class EvidenceLedger:
         # a caller left in a field never reaches the log. Pass None to disable.
         self._scrubber = scrubber
         self._entries: list[dict] = []
+        if path is not None and os.path.exists(path):
+            # Resume the chain already on disk. Appending to an existing file
+            # from the genesis hash would leave the whole file unverifiable.
+            self._entries = _read_entries(path)
 
     @staticmethod
     def _canonical(fields: dict) -> str:
@@ -152,18 +165,16 @@ class EvidenceLedger:
         """Load a ledger previously written to a JSON Lines file.
 
         Each line is restored verbatim, including its ``prev_hash`` and
-        ``entry_hash``, so :meth:`verify` can check the loaded chain and
-        :meth:`summary` can aggregate it. The scrubber is deliberately not
-        re-applied: the records were already scrubbed when first appended, and
-        re-scrubbing would change their bytes and break the chain.
+        ``entry_hash``, so :meth:`verify` checks the chain as it was written,
+        :meth:`summary` aggregates it, and a later :meth:`append` extends it.
+        Loaded records are not re-scrubbed: they were scrubbed when first
+        appended, and scrubbing them again would change their bytes and break
+        the chain. A missing file is an error here, unlike in the constructor,
+        where it just means nothing has been written yet.
         """
-        ledger = cls(path=None, scrubber=None)
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                stripped = line.strip()
-                if stripped:
-                    ledger._entries.append(json.loads(stripped))
-        return ledger
+        if not os.path.exists(path):
+            raise FileNotFoundError("ledger file not found: %s" % path)
+        return cls(path=path)
 
     def verify(self) -> bool:
         """Return True if the whole chain recomputes and links correctly."""
