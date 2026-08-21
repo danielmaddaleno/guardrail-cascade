@@ -7,7 +7,8 @@ Flow for one request:
    paid tier. Optionally shadow-sample a fraction of these short-circuits to
    tier two so we can measure the errors they hide: false positives on a block
    and false negatives on an allow. A shadow probe is a real tier-two call, so
-   it is billed and it never changes the decision, only measures it.
+   it is billed and it never changes the decision, only measures it. It carries
+   whatever redactions tier one applied, so masking is not undone for an audit.
 3. If tier one is unsure (FLAG or REDACT), escalate to tier two, the paid
    provider, and take its verdict. This is the ambiguous middle band that
    actually warrants the expensive check.
@@ -41,6 +42,10 @@ class TierResult:
     action: Action
     output: str | None
     results: list[CheckResult]
+    # The running text after every redaction the tier applied. Unlike ``output``
+    # it survives a block, so an audit path that still wants the text has a
+    # masked copy to use instead of the raw request.
+    masked: str | None = None
 
     @property
     def blocked(self) -> bool:
@@ -78,7 +83,9 @@ class Tier:
             if result.action == Action.BLOCK:
                 blocked = True
         action = Action.BLOCK if blocked else highest
-        return TierResult(tier=self.name, action=action, output=(None if blocked else output), results=results)
+        return TierResult(
+            tier=self.name, action=action, output=(None if blocked else output), results=results, masked=output
+        )
 
 
 @dataclass
@@ -160,7 +167,9 @@ class CascadePolicy:
         # even for audit: the whole point of the block is to stop it propagating.
         sensitive = any(r.sensitive for r in tr1.results)
         if self._should_shadow() and not sensitive:
-            probe = self.tier2.check(text)
+            # Probe with the redacted text. A block can still carry PII that a
+            # redactor already masked, and the probe must not undo that.
+            probe = self.tier2.check(tr1.masked if tr1.masked is not None else text)
             # Agreement means tier two would have reached the same call: block a
             # block, or leave an allow untouched. Any other verdict on an allow
             # (a REDACT or FLAG) counts as disagreement, a caught tier-one miss.

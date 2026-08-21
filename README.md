@@ -129,7 +129,8 @@ one sends a configurable fraction of its short-circuits to tier two anyway (off
 the hot path in production) and records whether tier two agreed, which surfaces
 both false positives on blocks and false negatives on allows. A block flagged
 sensitive (a matched secret) is never shadowed, so the credential is not
-forwarded to the paid tier even for audit.
+forwarded to the paid tier even for audit. A probe that does go out carries the
+text tier one already redacted, so a masked value is not un-masked on the way.
 
 ## Cost and audit in one place
 
