@@ -9,6 +9,9 @@ recompute every later hash forward, since the chain has no external anchor yet
 (see the roadmap). Because the same entries also carry token counts, latency and
 cost, the ledger doubles as the observability and FinOps surface.
 
+Appends are serialized with a lock, so several threads of one service can write
+to the same ledger and still produce a chain that verifies.
+
 Every entry is scrubbed before it is hashed and stored (see
 :mod:`guardrail_cascade.scrub`), so PII and secret-shaped values never land in
 the audit log even if a caller leaves one in a field.
@@ -20,6 +23,7 @@ import hashlib
 import json
 import math
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
@@ -100,6 +104,11 @@ class EvidenceLedger:
     exists, its entries are read back at construction time and the next
     :meth:`append` continues their chain instead of restarting from the genesis
     hash. ``now`` is injectable so tests get deterministic timestamps.
+
+    :meth:`append` reads the previous hash, links to it and writes the line
+    under a lock, so callers on different threads of one service produce a
+    chain that still verifies. The lock does not coordinate separate processes
+    writing the same file; one ledger object per file is the assumption.
     """
 
     def __init__(
@@ -114,6 +123,7 @@ class EvidenceLedger:
         # a caller left in a field never reaches the log. Pass None to disable.
         self._scrubber = scrubber
         self._entries: list[dict] = []
+        self._lock = threading.Lock()
         if path is not None and os.path.exists(path):
             # Resume the chain already on disk. Appending to an existing file
             # from the genesis hash would leave the whole file unverifiable.
@@ -146,14 +156,18 @@ class EvidenceLedger:
         record.setdefault("timestamp", self._now())
         if self._scrubber is not None:
             record = self._scrubber(record)
-        prev_hash = self._entries[-1]["entry_hash"] if self._entries else GENESIS_HASH
-        entry_hash = self._hash(prev_hash, record)
-        record["prev_hash"] = prev_hash
-        record["entry_hash"] = entry_hash
-        self._entries.append(record)
-        if self.path is not None:
-            with open(self.path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # Reading the previous hash, linking to it and writing the line have to
+        # be one step: two threads that read the same previous hash would each
+        # claim the same position and leave the chain unverifiable.
+        with self._lock:
+            prev_hash = self._entries[-1]["entry_hash"] if self._entries else GENESIS_HASH
+            entry_hash = self._hash(prev_hash, record)
+            record["prev_hash"] = prev_hash
+            record["entry_hash"] = entry_hash
+            self._entries.append(record)
+            if self.path is not None:
+                with open(self.path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         return record
 
     @property

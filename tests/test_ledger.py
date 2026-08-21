@@ -1,6 +1,7 @@
 """Tests for the evidence ledger: hash chain, tamper detection, summary."""
 
 import json
+import threading
 
 import pytest
 
@@ -186,3 +187,27 @@ def test_a_missing_path_starts_an_empty_ledger(tmp_path, clock):
 def test_load_still_raises_on_a_missing_file(tmp_path):
     with pytest.raises(FileNotFoundError):
         EvidenceLedger.load(str(tmp_path / "no-such-ledger.jsonl"))
+
+
+def test_concurrent_appends_keep_the_chain_verifiable(tmp_path):
+    # A service handles requests on several threads and they share one ledger,
+    # so append() has to hand out chain positions one at a time.
+    path = tmp_path / "concurrent.jsonl"
+    ledger = EvidenceLedger(path=str(path))
+    per_thread = 300
+    threads = [
+        threading.Thread(target=lambda worker=w: [ledger.append({"worker": worker, "i": i}) for i in range(per_thread)])
+        for w in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(ledger.entries) == 8 * per_thread
+    assert ledger.verify()
+    # The file has to end up in the same order as the chain, not just hold the
+    # same lines, or a ledger reloaded from disk no longer verifies.
+    reloaded = EvidenceLedger.load(str(path))
+    assert len(reloaded.entries) == 8 * per_thread
+    assert reloaded.verify()
