@@ -116,6 +116,34 @@ class TestPIIGuard:
         assert scrub_text(card) == "[CARD]"
         assert "[CARD]" in guard.check("card " + card).output
 
+    def test_leaves_a_bare_run_of_digits_alone(self, guard):
+        # An order id, a primary key and a build number all look like an SSN or
+        # a phone number to a length-only regex. Redacting one would escalate
+        # the request to the paid tier and hand the model a hole in the text.
+        for text in [
+            "show me order 123456789 status",
+            "select * from orders where id = 987654321",
+            "release 2026.08.21 build 1234567890",
+        ]:
+            assert guard.check(text).action is Action.ALLOW
+
+    def test_redacts_a_bare_ssn_when_a_word_says_what_it_is(self, guard):
+        result = guard.check("ssn: 078051120")
+        assert result.action is Action.REDACT
+        assert result.output == "ssn: [SSN]"  # the labeling word is context, not PII
+
+    def test_redacts_a_bare_phone_number_when_a_word_says_what_it_is(self, guard):
+        result = guard.check("phone 5551234567")
+        assert result.action is Action.REDACT
+        assert result.output == "phone [PHONE]"
+
+    def test_keeps_the_parentheses_form_of_a_phone_number_whole(self, guard):
+        assert guard.check("call me at (555) 123-4567").output == "call me at [PHONE]"
+
+    def test_sixteen_digits_that_fail_luhn_are_not_a_card(self, guard):
+        assert guard.check("invoice 1234-5678-9012-3456").action is Action.ALLOW
+        assert guard.check("pay with 4111 1111 1111 1111 today").action is Action.REDACT
+
     def test_reports_every_label_it_masked(self, guard):
         result = guard.check("mail a@b.com or call 555-123-4567")
         assert set(result.detail["labels"]) == {"EMAIL", "PHONE"}

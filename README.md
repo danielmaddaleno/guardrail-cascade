@@ -114,7 +114,9 @@ Tier one runs cheap, precompiled heuristics and returns one of four actions:
   on its own.
 - `ALLOW` when nothing fires, including the fuzzy checks. Also decided on its
   own.
-- `REDACT` PII in place and escalate the masked text.
+- `REDACT` PII in place and escalate the masked text. The digit rules need a
+  separator, a labeling word or a passing Luhn checksum, because an order id
+  masked by mistake escalates a request that tier one could have settled.
 - `FLAG` fuzzy signals (toxicity keywords) without blocking, and escalate.
 
 `ALLOW` and `BLOCK` short-circuit; `FLAG` and `REDACT` are the ambiguous middle

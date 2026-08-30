@@ -14,6 +14,8 @@ interface. These built-ins keep the package self-contained and runnable.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from typing import Callable
 
 from guardrail_cascade.core import Action, CheckResult, Guardrail
 
@@ -88,32 +90,100 @@ class PromptInjectionGuard(Guardrail):
         return CheckResult(guardrail=self.name, action=Action.ALLOW)
 
 
+def _digits(text: str) -> str:
+    return "".join(char for char in text if char.isdigit())
+
+
+def _luhn_ok(value: str) -> bool:
+    """True if the digits in *value* satisfy the Luhn checksum cards carry."""
+    digits = _digits(value)
+    total = 0
+    for position, char in enumerate(reversed(digits)):
+        digit = int(char)
+        if position % 2:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
+@dataclass(frozen=True)
+class _PIIRule:
+    """One PII shape: where to look, what to mask, and how to confirm it.
+
+    ``group`` names the part of the match to replace, so a rule can use nearby
+    words as context without masking them too. ``confirm`` is an extra check on
+    the matched value for shapes a regex cannot settle on its own.
+    """
+
+    label: str
+    pattern: re.Pattern[str]
+    group: int = 0
+    confirm: Callable[[str], bool] | None = None
+
+
+def _mask_rule(rule: _PIIRule, text: str) -> tuple[str, bool]:
+    """Replace every confirmed match of *rule* with its label."""
+    hits = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal hits
+        whole = match.group(0)
+        value = match.group(rule.group)
+        if rule.confirm is not None and not rule.confirm(value):
+            return whole
+        hits += 1
+        start = match.start(rule.group) - match.start(0)
+        end = match.end(rule.group) - match.start(0)
+        return whole[:start] + "[" + rule.label + "]" + whole[end:]
+
+    masked = rule.pattern.sub(replace, text)
+    return masked, hits > 0
+
+
 class PIIGuard(Guardrail):
     """REDACT common PII in place and forward the masked text.
 
+    A bare run of digits is an order id, a build number or a primary key far
+    more often than it is an SSN or a phone number, and masking one costs twice:
+    a REDACT escalates to the paid tier, and the model downstream reads a hole
+    where the id was. So the digit rules ask for more than a length. An SSN or a
+    phone number needs separators or a labeling word next to it, and a card
+    number has to pass the Luhn checksum.
+
     The card shape is kept in step with the ledger scrubber in
-    :mod:`guardrail_cascade.scrub`. If this guard masked less than the scrubber,
-    a card number would ride along to the paid tier before anything hid it, and
-    only get masked once the entry was written to the log.
+    :mod:`guardrail_cascade.scrub`, which masks the same shape without the
+    checksum. They only diverge on a number that is not a card, and the log is
+    where over-masking is the cheap mistake.
     """
 
-    PATTERNS = {
-        "EMAIL": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
-        "PHONE": r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
-        "SSN": r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b",
-        "CARD": r"\b(?:\d{4}[-.\s]?){3}\d{4}\b",
-    }
-
-    def __init__(self) -> None:
-        self._compiled = {label: re.compile(pattern) for label, pattern in self.PATTERNS.items()}
+    RULES: tuple[_PIIRule, ...] = (
+        _PIIRule("EMAIL", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
+        _PIIRule("CARD", re.compile(r"(?<!\d)(?:\d{4}[-.\s]?){3}\d{4}(?!\d)"), confirm=_luhn_ok),
+        # Separated: the writer already grouped the digits the way an SSN is written.
+        _PIIRule("SSN", re.compile(r"(?<!\d)\d{3}([-.\s])\d{2}\1\d{4}(?!\d)")),
+        # Bare nine digits, but only right after a word that says what they are.
+        _PIIRule(
+            "SSN",
+            re.compile(r"\b(?:ssn|social security(?: number)?)\b\D{0,12}((?<!\d)\d{9}(?!\d))", re.IGNORECASE),
+            group=1,
+        ),
+        _PIIRule("PHONE", re.compile(r"(?<!\d)(?:\+1[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]?\d{4}(?!\d)")),
+        _PIIRule(
+            "PHONE",
+            re.compile(r"\b(?:phone|tel|telephone|mobile|cell)\b\D{0,12}((?<!\d)\d{10}(?!\d))", re.IGNORECASE),
+            group=1,
+        ),
+    )
 
     def check(self, text: str) -> CheckResult:
         masked = text
-        hit_labels = []
-        for label, pattern in self._compiled.items():
-            masked, count = pattern.subn("[" + label + "]", masked)
-            if count:
-                hit_labels.append(label)
+        hit_labels: list[str] = []
+        for rule in self.RULES:
+            masked, hit = _mask_rule(rule, masked)
+            if hit and rule.label not in hit_labels:
+                hit_labels.append(rule.label)
         if hit_labels:
             return CheckResult(
                 guardrail=self.name,

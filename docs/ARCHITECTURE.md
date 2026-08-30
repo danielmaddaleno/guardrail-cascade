@@ -50,6 +50,13 @@ own; it escalates to tier two. That keeps a noisy keyword rule from quietly
 degrading the product. "High-precision" here is a design goal, not a measured
 number: there is no labeled eval set in the repo yet (see the roadmap).
 
+The same reasoning applies to `REDACT`, which is not free either: it escalates
+to the paid tier and it edits the text the model reads. A nine or ten digit run
+is usually an order id, so the SSN and phone rules want separators or a
+labeling word beside them, and a card number has to pass the Luhn checksum
+before it is masked. The regex finds candidates; a second, cheaper check
+decides.
+
 ### 2. Shadow sampling measures what a short-circuit hides
 
 By construction, a request decided at tier one never reaches tier two, so tier
