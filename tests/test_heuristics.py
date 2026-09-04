@@ -6,6 +6,21 @@ from guardrail_cascade.core import Action
 from guardrail_cascade.heuristics import PIIGuard, PromptInjectionGuard, SecretGuard, ToxicityGuard
 from guardrail_cascade.scrub import scrub_text
 
+JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r"
+AWS_SECRET = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# One sample per shape both the guard and the ledger scrubber know about.
+SECRET_SAMPLES = [
+    "AKIAIOSFODNN7EXAMPLE",
+    "ghp_" + "a" * 36,
+    "sk-proj-" + "a" * 24,
+    "AIza" + "B" * 35,
+    "sk_live_4eC39HqLyjWDarjt",
+    JWT,
+    AWS_SECRET,
+    "-----BEGIN RSA PRIVATE KEY-----",
+]
+
 
 class TestSecretGuard:
     @pytest.fixture
@@ -35,11 +50,27 @@ class TestSecretGuard:
         assert result.action is Action.BLOCK
         assert result.detail["kinds"] == ["google_api_key"]
 
+    def test_blocks_stripe_live_key(self, guard):
+        result = guard.check("sk_live_4eC39HqLyjWDarjt")
+        assert result.action is Action.BLOCK
+        assert result.detail["kinds"] == ["stripe_key"]
+
+    def test_blocks_jwt(self, guard):
+        result = guard.check("bearer " + JWT)
+        assert result.action is Action.BLOCK
+        assert result.detail["kinds"] == ["jwt"]
+
+    def test_blocks_aws_secret_key_next_to_its_name(self, guard):
+        assert guard.check(AWS_SECRET).action is Action.BLOCK
+        assert guard.check(AWS_SECRET.upper()).action is Action.BLOCK
+        # Forty base64 characters on their own are a hash as often as a key.
+        assert guard.check("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY").action is Action.ALLOW
+
     def test_blocks_every_key_shape_the_ledger_scrubber_masks(self, guard):
         # The scrubber masking a shape this guard allows means the value already
         # reached the paid tier before anything masked it.
-        for secret in ("AKIAIOSFODNN7EXAMPLE", "ghp_" + "a" * 36, "sk-proj-" + "a" * 24, "AIza" + "B" * 35):
-            assert scrub_text(secret) == "[SECRET]"
+        for secret in SECRET_SAMPLES:
+            assert "[SECRET]" in scrub_text(secret)
             assert guard.check(secret).action is Action.BLOCK
 
     def test_blocks_private_key_header(self, guard):

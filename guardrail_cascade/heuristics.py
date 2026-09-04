@@ -24,8 +24,10 @@ class SecretGuard(Guardrail):
     """BLOCK text that carries what looks like a live credential.
 
     Targets structured, prefixed secrets whose format is fixed, so a match is
-    high confidence. The matched value is never returned in the result, so the
-    guard does not become a second place the secret leaks.
+    high confidence. One shape has no prefix of its own, the AWS secret access
+    key, so it is only matched next to the name that introduces it. The matched
+    value is never returned in the result, so the guard does not become a second
+    place the secret leaks.
 
     These shapes are kept in step with the secret patterns in
     :mod:`guardrail_cascade.scrub`. The scrubber is the last line for the audit
@@ -39,6 +41,11 @@ class SecretGuard(Guardrail):
         "github_token": r"\bgh[oprsu]_[A-Za-z0-9]{36,}\b",
         "openai_api_key": r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b",
         "google_api_key": r"\bAIza[0-9A-Za-z_-]{35}\b",
+        "stripe_key": r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b",
+        "jwt": r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+",
+        # The 40 characters of an AWS secret key have no shape of their own, so
+        # the name that introduces them is part of the match.
+        "aws_secret_access_key": r"(?i:\baws_?secret_?access_?key\b)\s*[=:]\s*[\"\']?[A-Za-z0-9/+=]{40}",
         "private_key": r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
     }
 

@@ -28,6 +28,16 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bgh[oprsu]_[A-Za-z0-9]{36,}\b"), "[SECRET]"),
     (re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "[SECRET]"),
     (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"), "[SECRET]"),
+    (re.compile(r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b"), "[SECRET]"),
+    # Three base64url segments starting from the "eyJ" that every JWT header
+    # begins with, so an id or access token in a field does not survive.
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"), "[SECRET]"),
+    # An AWS secret access key is 40 unremarkable base64 characters, so it is
+    # only recognizable next to the name that introduces it. The name is kept.
+    (
+        re.compile(r"((?i:\baws_?secret_?access_?key\b)\s*[=:]\s*[\"\']?)([A-Za-z0-9/+=]{40})"),
+        r"\g<1>[SECRET]",
+    ),
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"), "[SECRET]"),
 ]
 

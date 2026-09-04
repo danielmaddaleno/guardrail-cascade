@@ -19,6 +19,23 @@ def test_masks_secret_shapes():
     assert scrub_text("-----BEGIN RSA PRIVATE KEY-----") == "[SECRET]"
 
 
+def test_masks_jwt_stripe_and_aws_secret_key():
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r"
+    assert scrub_text("bearer " + jwt) == "bearer [SECRET]"
+    assert scrub_text("sk_live_4eC39HqLyjWDarjt") == "[SECRET]"
+    # The name that introduces the key stays, because it is the only reason the
+    # 40 characters after it are readable as a key at all.
+    masked = scrub_text("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    assert masked == "aws_secret_access_key = [SECRET]"
+
+
+def test_leaves_a_lone_base64_blob_alone():
+    # Forty base64 characters with no key name beside them are as likely to be a
+    # hash or an id, and the log is more useful with them in it.
+    text = "digest YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY="
+    assert scrub_text(text) == text
+
+
 def test_leaves_clean_text_untouched():
     text = "the quarterly report is ready for review"
     assert scrub_text(text) == text
