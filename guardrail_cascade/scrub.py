@@ -6,12 +6,23 @@ ledger from them. This module does not trust that. A custom guardrail, or a real
 tier-two provider that returns the offending span, could place a raw email or
 credential in a ``reason`` or ``detail`` field, and the ledger would otherwise
 store it verbatim. :func:`scrub` masks PII and secret-shaped substrings in every
-string the ledger persists, so the audit log stays safe regardless of who
-produced the entry.
+string the ledger persists, so the log does not depend on the caller getting it
+right.
+
+What it catches is the list in ``_PATTERNS`` and nothing else: emails, phone
+numbers, SSNs, card numbers, and the credentials with a recognizable format
+(AWS access key ids and secret keys, GitHub tokens, Google and OpenAI API keys,
+Stripe live keys, JWTs, PEM private key headers). A credential format that is
+not listed, and PII that has no shape at all such as a person's name, are not
+masked. Read it as a net with a known mesh, not as a guarantee, and add the
+shapes your own traffic carries.
 
 The patterns are intentionally independent of the detection heuristics: the log
-must be safe even when no PII guardrail is configured, so this net does not
-depend on which guardrails are in the tier.
+must be masked even when no PII guardrail is configured, so this net does not
+depend on which guardrails are in the tier. It is also the looser of the two on
+PII, without the checksum and context checks
+:class:`guardrail_cascade.heuristics.PIIGuard` applies, because masking a stray
+order id in a log costs less than forwarding one to a paid provider.
 """
 
 from __future__ import annotations

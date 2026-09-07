@@ -139,10 +139,14 @@ text tier one already redacted, so a masked value is not un-masked on the way.
 The evidence ledger appends one hash-chained entry per request. Each entry
 records the action, which tier decided, which guardrail fired and its structured
 detail, a token estimate, latency, and the cost incurred or saved. Every entry is
-scrubbed before it is stored, so PII and secret-shaped values never land in the
-audit log even if a custom guardrail or provider leaves one in a field. That
-makes it both the audit trail a governance review asks for and the observability
-and FinOps surface an engineer wants. `summary()` reports the short-circuit rate
+scrubbed before it is stored, so a raw value a custom guardrail or provider left
+in a field is masked when it matches a shape the scrubber knows: emails, phone
+numbers, SSNs, card numbers, and the credential formats with a fixed prefix (AWS,
+GitHub, Google, OpenAI, Stripe live keys, JWTs, PEM private key headers). The
+list is finite and worth reading before trusting it: a credential shape that is
+not on it, and PII with no shape at all such as a person's name, still reach the
+log. That makes it both the audit trail a governance review asks for and the
+observability and FinOps surface an engineer wants. `summary()` reports the short-circuit rate
 and the tier-two spend it avoided.
 
 The improvement loop closes it: `CandidateMiner` groups the misses (requests

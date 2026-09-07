@@ -111,8 +111,14 @@ PII and secret-shaped substrings in every string field are masked. The built-in
 guardrails only put labels in a result, never raw values, but a custom guardrail
 or a real tier-two provider could return the offending span, so the ledger masks
 defensively rather than trusting its callers. The scrubber is independent of the
-detection heuristics on purpose: the log must be safe even when no PII guardrail
-is configured.
+detection heuristics on purpose: the log must be masked even when no PII
+guardrail is configured.
+
+What it masks is a fixed list of shapes, so it is worth stating what it is not.
+A credential format the list does not carry goes into the log verbatim, and so
+does PII with no shape to match on, a person's name being the obvious one. The
+honest description is a net with a known mesh, which is the useful thing to hand
+an auditor, rather than a claim that nothing gets through.
 
 ## The governance layer
 

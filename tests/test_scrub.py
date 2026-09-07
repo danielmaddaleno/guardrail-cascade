@@ -36,6 +36,13 @@ def test_leaves_a_lone_base64_blob_alone():
     assert scrub_text(text) == text
 
 
+def test_leaves_a_persons_name_alone():
+    # The scrubber matches shapes, and a name has none. Worth pinning so the
+    # documented limit and the code do not drift apart.
+    text = "the account holder is Jane Doe"
+    assert scrub_text(text) == text
+
+
 def test_leaves_clean_text_untouched():
     text = "the quarterly report is ready for review"
     assert scrub_text(text) == text

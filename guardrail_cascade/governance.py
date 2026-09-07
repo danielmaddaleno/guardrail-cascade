@@ -127,12 +127,12 @@ CONTROL_CATALOG: tuple[Control, ...] = (
     ),
     Control(
         control_id="log-scrubbing",
-        title="The audit log itself is scrubbed of PII and secrets",
+        title="The audit log itself is scrubbed of known PII and secret shapes",
         mechanism="scrub.scrub via ledger.EvidenceLedger.append",
         description=(
             "Every entry is masked before it is hashed and stored, independently of which guardrails are "
-            "configured, so a raw value a custom guardrail or provider leaves in a field never reaches "
-            "the log."
+            "configured. The masking is a fixed list of shapes (emails, phone numbers, SSNs, card numbers "
+            "and prefixed credential formats), so a value outside that list still reaches the log."
         ),
         references=(
             FrameworkRef("NIST AI RMF", "MANAGE", "mechanisms to minimize harms from data handling"),

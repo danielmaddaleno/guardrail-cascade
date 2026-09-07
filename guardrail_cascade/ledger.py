@@ -13,8 +13,10 @@ Appends are serialized with a lock, so several threads of one service can write
 to the same ledger and still produce a chain that verifies.
 
 Every entry is scrubbed before it is hashed and stored (see
-:mod:`guardrail_cascade.scrub`), so PII and secret-shaped values never land in
-the audit log even if a caller leaves one in a field.
+:mod:`guardrail_cascade.scrub`), so a raw value a caller left in a field is
+masked when it matches one of the shapes that module lists. The list is fixed:
+a credential format it does not know, and PII with no shape at all such as a
+name, still reach the log.
 """
 
 from __future__ import annotations
@@ -120,7 +122,8 @@ class EvidenceLedger:
         self.path = path
         self._now = now
         # Applied to every entry before it is hashed and stored, so a raw value
-        # a caller left in a field never reaches the log. Pass None to disable.
+        # a caller left in a field is masked if the scrubber knows its shape.
+        # Pass None to disable.
         self._scrubber = scrubber
         self._entries: list[dict] = []
         self._lock = threading.Lock()
@@ -145,9 +148,10 @@ class EvidenceLedger:
         stored record is ``fields`` (after scrubbing) plus ``prev_hash`` and
         ``entry_hash``. Those two keys are reserved: passing them in ``fields``
         is rejected, otherwise an entry could be born already failing
-        :meth:`verify`. The scrubber masks PII and secret-shaped substrings in
-        every string field before the entry is hashed, so a raw value a caller
-        left in ``reason`` or ``detail`` never lands in the log.
+        :meth:`verify`. The scrubber masks the PII and secret shapes it knows
+        in every string field before the entry is hashed, so a raw value a
+        caller left in ``reason`` or ``detail`` is masked if it has one of
+        those shapes.
         """
         for reserved in ("prev_hash", "entry_hash"):
             if reserved in fields:
