@@ -1,9 +1,9 @@
 # Roadmap
 
 Built incrementally, one small and defensible change at a time. Shipped so far:
-the two-tier cascade, the four heuristic guardrails, the offline provider, the
-hash-chained ledger with a cost, latency and shadow-agreement summary, the
-shadow sampler, the candidate miner, the command-line interface (`check`,
+the two-tier cascade, the four heuristic guardrails, the offline provider and a
+Claude provider, the hash-chained ledger with a cost, latency and
+shadow-agreement summary, the shadow sampler, the candidate miner, the command-line interface (`check`,
 `report`, `lint`, `card`), and the governance layer: a typed policy schema
 loadable from JSON (YAML with the optional extra), a control catalog
 crosswalked to NIST AI RMF, ISO/IEC 42001 and the EU AI Act, a policy lint
@@ -16,10 +16,10 @@ policy plus the ledger. What follows is the order things get added.
   simplicity. Move it to a background task so it never adds latency to a blocked
   request, and report the agreement rate over a sliding window rather than only
   cumulatively.
-- **Provider adapters.** A thin `BedrockProvider` around the AWS Bedrock
-  Guardrails API, and a local `LlamaGuardProvider`, both behind the existing
-  `Tier2Provider` interface. Keep the offline stub as the default so CI stays
-  credential-free.
+- **More provider adapters.** `ClaudeProvider` shipped. Next are a thin
+  `BedrockProvider` around the AWS Bedrock Guardrails API and a local
+  `LlamaGuardProvider`, behind the same `Tier2Provider` interface. Keep the
+  offline stub as the default so CI stays credential-free.
 - **Redaction from a real toolkit.** Let tier one delegate to a dedicated
   guardrails library (for example llm-guardrails-toolkit) behind the `Guardrail`
   interface, instead of the built-in patterns.

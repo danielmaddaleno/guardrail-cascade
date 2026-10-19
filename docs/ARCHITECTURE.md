@@ -167,7 +167,7 @@ Two consumers close the loop:
 | --- | --- |
 | `core` | `Action`, `CheckResult`, the `Guardrail` interface |
 | `heuristics` | Concrete tier-one guardrails (secrets, injection, PII, toxicity) |
-| `providers` | `Tier2Provider` interface and the offline `StubProvider` |
+| `providers` | `Tier2Provider` interface, `ClaudeProvider` and the offline `StubProvider` |
 | `cascade` | `Tier` combination logic and the `CascadePolicy` orchestrator |
 | `ledger` | `EvidenceLedger`, `CostModel`, `LedgerSummary` |
 | `scrub` | PII and secret masking applied to every ledger entry |

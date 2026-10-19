@@ -39,7 +39,7 @@ from guardrail_cascade import (
 
 ledger = EvidenceLedger()
 tier1 = Tier("heuristics", [SecretGuard(), PromptInjectionGuard(), PIIGuard(), ToxicityGuard()])
-tier2 = StubProvider(block_keywords=["malware", "weapon"])   # swap for Bedrock or Llama Guard
+tier2 = StubProvider(block_keywords=["malware", "weapon"])   # or ClaudeProvider() for a real model
 policy = CascadePolicy(tier1, tier2, ledger)
 
 clean = policy.evaluate("What is the capital of France?")
@@ -123,7 +123,22 @@ Tier one runs cheap, precompiled heuristics and returns one of four actions:
 that escalates to tier two. Tier two is any model-based guardrail behind a
 one-method interface (`Tier2Provider`). The bundled `StubProvider` is
 deterministic and offline, so the whole pipeline runs in CI with no credentials.
-Adapters for AWS Bedrock Guardrails and Llama Guard are on the roadmap.
+`ClaudeProvider` is the real one: it asks a Claude model (Haiku by default) for
+an allow or block verdict and a category, constrained to a JSON schema.
+
+```python
+from guardrail_cascade import ClaudeProvider   # pip install "guardrail-cascade[claude]"
+
+tier2 = ClaudeProvider()                  # reads ANTHROPIC_API_KEY
+tier2 = ClaudeProvider(fail_open=True)    # let traffic through as FLAG if the API is down
+```
+
+The request goes in as data inside tags, never as instructions. The ledger
+reason is built from the category, so the model's prose never reaches the log. A
+model refusal counts as a block, and an API error or an unusable answer fails
+closed unless `fail_open` is set. On Haiku a check costs about 600 input tokens
+and adds one to two seconds to an escalated request.
+Adapters for AWS Bedrock Guardrails and Llama Guard are still on the roadmap.
 
 The tradeoff of short-circuiting a confident allow is that a tier-one false
 negative passes without a second opinion. Shadow sampling is the answer: tier
@@ -193,7 +208,7 @@ the card says so itself.
 guardrail_cascade/
   core.py         # Action, CheckResult, the Guardrail interface
   heuristics.py   # tier-one guardrails: secrets, injection, PII, toxicity
-  providers.py    # Tier2Provider interface + offline StubProvider
+  providers.py    # Tier2Provider interface, ClaudeProvider, offline StubProvider
   cascade.py      # Tier combination + CascadePolicy orchestrator
   ledger.py       # EvidenceLedger, CostModel, LedgerSummary
   scrub.py        # PII/secret masking applied to every ledger entry
@@ -236,14 +251,15 @@ full read and write access, who could rewrite an entry and recompute every later
 hash forward, because the chain has no external anchor (a published head hash or
 a signature). Adding one is on the roadmap.
 
-The bundled tier two is an offline stub for demos and tests; a real deployment
-plugs in a model-based provider. Token cost is estimated from character length,
+The default tier two is an offline stub for demos and tests. `ClaudeProvider`
+is the model-based one, and there is no labeled eval of its verdicts in the repo
+yet either. Token cost is estimated from character length,
 which is close enough for accounting but is not an exact tokenizer count.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Highlights: provider adapters (Bedrock,
-Llama Guard), async off-path shadow sampling, a signed or published ledger head
+See [docs/ROADMAP.md](docs/ROADMAP.md). Highlights: more provider adapters
+(Bedrock, Llama Guard), async off-path shadow sampling, a signed or published ledger head
 hash, a ledger report renderer, and a learned tier 1.5 trained on tier-two
 labels plus shadow-sampled allows.
 

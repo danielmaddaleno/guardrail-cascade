@@ -3,3 +3,5 @@ pytest-cov>=4.0,<8
 flake8>=6.0,<8
 black>=23.0,<27
 mypy>=1.0,<3
+# Only so the ClaudeProvider tests run against a fake client; CI never calls the API.
+anthropic>=1.0,<2
