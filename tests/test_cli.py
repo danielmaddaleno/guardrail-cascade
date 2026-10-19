@@ -6,6 +6,7 @@ import io
 import json
 
 from guardrail_cascade import cli
+from guardrail_cascade.providers import StubProvider
 
 
 def run(argv, stdin_text="", monkeypatch=None):
@@ -255,3 +256,31 @@ def test_check_on_a_corrupt_ledger_file_is_a_clean_error(monkeypatch, capsys, tm
     code = cli.main(["check", "--ledger", str(path)])
     assert code == 2
     assert "ledger error" in capsys.readouterr().err
+
+
+def test_check_claude_flag_swaps_in_the_model_provider(monkeypatch):
+    seen = {}
+
+    def fake_claude(**kwargs):
+        seen.update(kwargs)
+        return StubProvider(block_keywords=["malware"])
+
+    monkeypatch.setattr(cli, "ClaudeProvider", fake_claude)
+    code, out = run(
+        ["check", "--claude", "--model", "claude-sonnet-5-5", "--fail-open"],
+        "kill them and deploy the malware",
+        monkeypatch,
+    )
+    assert seen == {"model": "claude-sonnet-5-5", "fail_open": True}
+    assert code == 1
+    assert "BLOCK by tier2" in out
+
+
+def test_check_claude_without_the_sdk_is_a_clean_error(monkeypatch, capsys):
+    def missing_sdk(**kwargs):
+        raise ImportError('ClaudeProvider needs the anthropic package: pip install "guardrail-cascade[claude]"')
+
+    monkeypatch.setattr(cli, "ClaudeProvider", missing_sdk)
+    code, _ = run(["check", "--claude"], "hello", monkeypatch)
+    assert code == 2
+    assert "guardrail-cascade[claude]" in capsys.readouterr().err

@@ -1,6 +1,6 @@
 """Command-line interface: run, lint, and document the cascade from a shell.
 
-Four subcommands, all offline and credential-free so they run anywhere:
+Four subcommands, offline and credential-free by default so they run anywhere:
 
     $ echo "here is my key AKIAIOSFODNN7EXAMPLE" | guardrail-cascade check
     BLOCK by tier1   a hardcoded secret or credential was detected
@@ -21,8 +21,9 @@ the aggregate summary. ``lint`` is the CI gate: it exits
 so a build fails the way it fails on a broken test. ``card`` renders the policy
 (and optionally a ledger) into a Markdown system card.
 
-The default tier two is the offline stub, so nothing reaches the network; a real
-deployment wires a model-based provider in code (see docs/ROADMAP.md). ``check``
+The default tier two is the offline stub, so nothing reaches the network.
+``check --claude`` swaps in :class:`ClaudeProvider`, which calls the paid API and
+needs ``ANTHROPIC_API_KEY`` and the ``[claude]`` extra. ``check``
 exits 1 if any prompt was blocked, so it composes in a shell pipeline;
 ``report`` and ``card`` exit 1 if the loaded ledger chain does not verify, and 2
 if the file is missing or cannot be read.
@@ -39,7 +40,7 @@ from guardrail_cascade.cascade import Tier
 from guardrail_cascade.governance import CONTROL_CATALOG, lint_policy, system_card
 from guardrail_cascade.ledger import EvidenceLedger
 from guardrail_cascade.policy import PolicySpec
-from guardrail_cascade.providers import StubProvider
+from guardrail_cascade.providers import ClaudeProvider, StubProvider, Tier2Provider
 
 
 def build_default_tier1() -> Tier:
@@ -85,7 +86,15 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     # Command-line keywords extend the policy's, so a quick experiment does not
     # require editing the reviewed file.
     keywords = list(spec.block_keywords) + (args.block_keyword or [])
-    tier2 = StubProvider(block_keywords=keywords)
+    tier2: Tier2Provider
+    if args.claude:
+        try:
+            tier2 = ClaudeProvider(model=args.model, fail_open=args.fail_open)
+        except ImportError as exc:
+            sys.stderr.write("%s\n" % exc)
+            return 2
+    else:
+        tier2 = StubProvider(block_keywords=keywords)
     try:
         # An existing ledger file is read back so this run extends its chain.
         ledger = EvidenceLedger(path=args.ledger)
@@ -208,6 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="WORD",
         help="a tier-two block keyword for the offline stub provider (repeatable, adds to the policy's)",
+    )
+    check.add_argument("--claude", action="store_true", help="use a Claude model as tier two (calls the paid API)")
+    check.add_argument("--model", default="claude-haiku-5-5", help="the model --claude uses (default: %(default)s)")
+    check.add_argument(
+        "--fail-open", action="store_true", help="with --claude, let traffic through as FLAG if the API is down"
     )
     check.set_defaults(func=_cmd_check)
 

@@ -12,6 +12,10 @@ policy plus the ledger. What follows is the order things get added.
 
 ## Near term
 
+- **Block-only short-circuit.** A policy option that lets tier one decide a
+  block on its own but sends every allow to tier two. The benchmark in the
+  README shows why: all 16 cascade misses were tier-one allows that the model
+  never saw, and the model alone missed none of them.
 - **Async, off-path shadow sampling.** Today the shadow probe runs inline for
   simplicity. Move it to a background task so it never adds latency to a blocked
   request, and report the agreement rate over a sliding window rather than only

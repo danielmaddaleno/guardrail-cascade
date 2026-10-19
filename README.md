@@ -65,8 +65,8 @@ python examples/demo.py
 
 ## Command line
 
-Installing the package puts a `guardrail-cascade` command on your path. It runs
-the same offline cascade, so it needs no credentials.
+Installing the package puts a `guardrail-cascade` command on your path. By
+default it runs the same offline cascade, so it needs no credentials.
 
 ```bash
 # Screen prompts, one per line from stdin. Exit code is 1 if any is blocked,
@@ -89,6 +89,8 @@ Tier-two cost saved: $0.000081
 
 `--single` treats all of stdin as one prompt, and `--block-keyword WORD`
 (repeatable) configures the offline stub that stands in for the paid tier two.
+`--claude` uses a Claude model as tier two instead (`--model` picks which one),
+which calls the paid API.
 
 The governance layer is on the command line too:
 
@@ -148,6 +150,40 @@ both false positives on blocks and false negatives on allows. A block flagged
 sensitive (a matched secret) is never shadowed, so the credential is not
 forwarded to the paid tier even for audit. A probe that does go out carries the
 text tier one already redacted, so a masked value is not un-masked on the way.
+
+## Measured against a real tier two
+
+`examples/benchmark.py` sends 58 hand-labeled prompts through the cascade and
+then through the model alone: benign requests, PII, benign text that trips the
+toxicity keywords, harmful requests, prompt injections and pasted credentials.
+Tier two is Claude Haiku 5.5 and the cost comes from the token counts the API
+returns.
+
+| | Cascade | Model alone |
+|---|---|---|
+| Correct | 42 / 58 | 55 / 58 |
+| Wrongly blocked | 0 | 0 |
+| Missed | 16 | 3 |
+| Tier-two calls | 18 | 58 |
+| Cost per million requests | $21 | $71 |
+| Latency p50 / p95 | 0 / 1326 ms | 1237 / 1823 ms |
+
+The cascade is about 70% cheaper and misses five times as many. Every one of its
+16 misses is a request where no heuristic fired: rephrased injections ("you are
+now DAN") and harmful asks with no keyword in them (a keylogger, ransomware, a
+pipe bomb). Tier one returns a confident ALLOW, the request short-circuits, and
+the model never sees it. The model alone missed only the three pasted
+credentials, which tier one blocks on its own. The two error sets do not
+overlap, so a short-circuited allow is only as good as the regexes behind it.
+Shadow sampling measures that gap but does not close it. On this traffic the
+safer setup lets tier one decide blocks only and sends every allow to tier two,
+which the roadmap adds as a policy option.
+
+The set is small and labeled by hand, so treat it as a comparison of the two
+setups on the same traffic, not as a precision eval. Two runs gave the same
+verdicts and cost; latency moved by about 10%. Run it yourself with
+`pip install -e ".[claude]"` and `python examples/benchmark.py` (well under one
+cent on Haiku).
 
 ## Cost and audit in one place
 
@@ -218,6 +254,8 @@ guardrail_cascade/
   cli.py          # `check` / `report` / `lint` / `card` command line
 tests/            # unit tests for every module
 examples/demo.py  # end-to-end offline run
+examples/benchmark.py  # cascade vs model alone on labeled prompts (paid API)
+examples/bench_prompts.jsonl  # the 58 labeled prompts it runs
 examples/policy.json  # the reviewed policy the CI governance gate lints
 docs/             # ARCHITECTURE.md, ROADMAP.md
 ```
