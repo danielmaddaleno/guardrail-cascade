@@ -45,6 +45,7 @@ _SPEC_KEYS = {
     "version",
     "guardrails",
     "shadow_sample_rate",
+    "short_circuit_allow",
     "block_keywords",
     "price_per_1k_tokens",
     "chars_per_token",
@@ -71,13 +72,16 @@ class PolicySpec:
     offline stub used when no real tier-two provider is wired in, so a policy
     file is runnable as-is in CI. The two cost fields feed the
     :class:`~guardrail_cascade.ledger.CostModel` that prices what a
-    short-circuit saved.
+    short-circuit saved. ``short_circuit_allow`` defaults to true; set it false
+    to route every tier-one allow to tier two and let only blocks short-circuit,
+    the stricter setting the README benchmark recommends for this traffic.
     """
 
     name: str = "default"
     version: str = "1"
     guardrails: list[str] = field(default_factory=lambda: list(DEFAULT_GUARDRAILS))
     shadow_sample_rate: float = 0.0
+    short_circuit_allow: bool = True
     block_keywords: list[str] = field(default_factory=list)
     price_per_1k_tokens: float = 0.003
     chars_per_token: float = 4.0
@@ -138,6 +142,7 @@ class PolicySpec:
             "version": self.version,
             "guardrails": list(self.guardrails),
             "shadow_sample_rate": self.shadow_sample_rate,
+            "short_circuit_allow": self.short_circuit_allow,
             "block_keywords": list(self.block_keywords),
             "price_per_1k_tokens": self.price_per_1k_tokens,
             "chars_per_token": self.chars_per_token,
@@ -172,6 +177,9 @@ class PolicySpec:
             problems.append("shadow_sample_rate must be a number between 0 and 1")
         elif not 0.0 <= float(self.shadow_sample_rate) <= 1.0:
             problems.append("shadow_sample_rate must be between 0 and 1, got %s" % self.shadow_sample_rate)
+
+        if not isinstance(self.short_circuit_allow, bool):
+            problems.append("short_circuit_allow must be true or false")
 
         if not isinstance(self.block_keywords, list) or any(
             not isinstance(k, str) or not k.strip() for k in self.block_keywords
@@ -221,5 +229,6 @@ class PolicySpec:
             ledger if ledger is not None else EvidenceLedger(),
             cost_model=self.build_cost_model(),
             shadow_sample_rate=float(self.shadow_sample_rate),
+            short_circuit_allow=self.short_circuit_allow,
             **extras,
         )

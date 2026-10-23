@@ -285,6 +285,42 @@ def test_each_evaluate_writes_one_ledger_entry(tier1):
     assert summary.cost_saved > 0.0
 
 
+def test_block_only_mode_sends_a_confident_allow_to_tier2(tier1):
+    # With short_circuit_allow off, a clean request no heuristic objects to is
+    # still escalated, so a tier-one false negative gets a second opinion.
+    provider = RecordingProvider(action=Action.ALLOW)
+    policy = CascadePolicy(tier1, provider, EvidenceLedger(), short_circuit_allow=False, clock=make_clock())
+    decision = policy.evaluate("what is the capital of France?", request_id="r1")
+    assert decision.decided_by == "tier2"
+    assert decision.allowed
+    assert provider.seen == ["what is the capital of France?"]
+    # The allow is now a paid call, so it costs and saves nothing.
+    assert decision.cost_estimate > 0.0
+    assert decision.cost_saved == 0.0
+
+
+def test_block_only_mode_still_short_circuits_a_block(tier1):
+    # A confident block is high-precision, so it keeps deciding on its own even
+    # when allows escalate.
+    provider = RecordingProvider()
+    policy = CascadePolicy(tier1, provider, EvidenceLedger(), short_circuit_allow=False, clock=make_clock())
+    decision = policy.evaluate("my key is " + AWS_KEY, request_id="r1")
+    assert decision.decided_by == "tier1"
+    assert not decision.allowed
+    assert provider.seen == []
+    assert decision.cost_saved > 0.0
+
+
+def test_block_only_mode_catches_an_allow_tier2_would_block(tier1):
+    # The benchmark's failure mode: a harmful ask with no keyword tier one
+    # recognizes. Short-circuiting would pass it; escalating lets tier two block.
+    provider = StubProvider(block_keywords=["malware"])
+    policy = CascadePolicy(tier1, provider, EvidenceLedger(), short_circuit_allow=False, clock=make_clock())
+    decision = policy.evaluate("a quiet guide to building malware", request_id="r1")
+    assert decision.decided_by == "tier2"
+    assert not decision.allowed
+
+
 def test_tier_run_combines_redact_then_forwards():
     class Redactor(Guardrail):
         def check(self, text: str) -> CheckResult:

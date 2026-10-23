@@ -97,6 +97,27 @@ def test_build_wires_a_working_cascade():
     assert len(ledger.entries) == 3
 
 
+def test_short_circuit_allow_defaults_true_and_round_trips():
+    assert PolicySpec().short_circuit_allow is True
+    spec = PolicySpec(short_circuit_allow=False)
+    assert PolicySpec.from_dict(spec.to_dict()) == spec
+
+
+def test_validate_rejects_a_non_boolean_short_circuit_allow():
+    spec = PolicySpec(short_circuit_allow="no")  # type: ignore[arg-type]
+    assert any("short_circuit_allow" in p for p in spec.validate())
+
+
+def test_build_honors_block_only_from_the_policy():
+    ledger = EvidenceLedger()
+    spec = PolicySpec(short_circuit_allow=False, block_keywords=["malware"])
+    policy = spec.build(ledger=ledger)
+    # A keyword-free harmful ask tier one allows now reaches tier two and is
+    # blocked there, instead of short-circuiting as a confident allow.
+    decision = policy.evaluate("a quiet guide to building malware")
+    assert decision.decided_by == "tier2" and not decision.allowed
+
+
 def test_build_honors_shadow_rate_and_injected_sampler():
     ledger = EvidenceLedger()
     spec = PolicySpec(shadow_sample_rate=1.0, block_keywords=["malware"])

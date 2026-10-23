@@ -348,6 +348,7 @@ def system_card(
         "| --- | --- |",
         "| Tier-one guardrails | %s |" % (_cell(", ".join(policy.guardrails)) if policy.guardrails else "(none)"),
         "| Shadow sample rate | %g |" % float(policy.shadow_sample_rate),
+        "| Short-circuit allows | %s |" % ("yes" if policy.short_circuit_allow else "no (allows escalate to tier two)"),
         "| Tier-two stub block keywords | %s |"
         % (_cell(", ".join(policy.block_keywords)) if policy.block_keywords else "(none)"),
         "| Price per 1k tokens | $%g |" % policy.price_per_1k_tokens,

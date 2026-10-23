@@ -9,6 +9,9 @@ Flow for one request:
    and false negatives on an allow. A shadow probe is a real tier-two call, so
    it is billed and it never changes the decision, only measures it. It carries
    whatever redactions tier one applied, so masking is not undone for an audit.
+   With ``short_circuit_allow=False`` a confident ALLOW escalates instead, so
+   only a BLOCK is decided by tier one alone; every allow gets the paid second
+   opinion the benchmark shows it needs.
 3. If tier one is unsure (FLAG or REDACT), escalate to tier two, the paid
    provider, and take its verdict. This is the ambiguous middle band that
    actually warrants the expensive check.
@@ -129,6 +132,7 @@ class CascadePolicy:
         *,
         cost_model: CostModel | None = None,
         shadow_sample_rate: float = 0.0,
+        short_circuit_allow: bool = True,
         sampler: Callable[[], float] = random.random,
         clock: Callable[[], float] = time.monotonic,
     ):
@@ -137,6 +141,12 @@ class CascadePolicy:
         self.ledger = ledger
         self.cost_model = cost_model or CostModel()
         self.shadow_sample_rate = shadow_sample_rate
+        # When false, a tier-one ALLOW is sent to tier two instead of deciding
+        # on its own; only a BLOCK short-circuits. A tier-one false negative is
+        # a confident ALLOW the model never sees, so this trades the saved spend
+        # for a second opinion on every allow. Shadow sampling measures that gap
+        # but only closes it for the sampled fraction; this closes it for all.
+        self.short_circuit_allow = short_circuit_allow
         self._sampler = sampler
         self._clock = clock
 
@@ -150,7 +160,8 @@ class CascadePolicy:
         start = self._clock()
         tr1 = self.tier1.run(text)
 
-        if tr1.action in (Action.ALLOW, Action.BLOCK):
+        short_circuit = tr1.action == Action.BLOCK or (tr1.action == Action.ALLOW and self.short_circuit_allow)
+        if short_circuit:
             decision = self._short_circuit(text, tr1, request_id, start)
         else:
             decision = self._escalate(text, tr1, request_id, start)

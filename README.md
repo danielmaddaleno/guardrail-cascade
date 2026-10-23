@@ -122,8 +122,11 @@ Tier one runs cheap, precompiled heuristics and returns one of four actions:
 - `FLAG` fuzzy signals (toxicity keywords) without blocking, and escalate.
 
 `ALLOW` and `BLOCK` short-circuit; `FLAG` and `REDACT` are the ambiguous middle
-that escalates to tier two. Tier two is any model-based guardrail behind a
-one-method interface (`Tier2Provider`). The bundled `StubProvider` is
+that escalates to tier two. Setting `short_circuit_allow` to false narrows that
+to blocks alone, so every allow still goes to tier two for a second opinion (see
+the benchmark below for when that tradeoff is worth it). Tier two is any
+model-based guardrail behind a one-method interface (`Tier2Provider`). The
+bundled `StubProvider` is
 deterministic and offline, so the whole pipeline runs in CI with no credentials.
 `ClaudeProvider` is the real one: it asks a Claude model (Haiku by default) for
 an allow or block verdict and a category, constrained to a JSON schema.
@@ -176,8 +179,10 @@ the model never sees it. The model alone missed only the three pasted
 credentials, which tier one blocks on its own. The two error sets do not
 overlap, so a short-circuited allow is only as good as the regexes behind it.
 Shadow sampling measures that gap but does not close it. On this traffic the
-safer setup lets tier one decide blocks only and sends every allow to tier two,
-which the roadmap adds as a policy option.
+safer setup lets tier one decide blocks only and sends every allow to tier two.
+That setup is the `short_circuit_allow: false` policy option: blocks still
+short-circuit for free, every allow pays for the model's second opinion, and no
+tier-one false negative goes unseen.
 
 The set is small and labeled by hand, so treat it as a comparison of the two
 setups on the same traffic, not as a precision eval. Two runs gave the same

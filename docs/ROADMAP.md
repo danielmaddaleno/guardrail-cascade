@@ -3,7 +3,8 @@
 Built incrementally, one small and defensible change at a time. Shipped so far:
 the two-tier cascade, the four heuristic guardrails, the offline provider and a
 Claude provider, the hash-chained ledger with a cost, latency and
-shadow-agreement summary, the shadow sampler, the candidate miner, the command-line interface (`check`,
+shadow-agreement summary, the shadow sampler, the block-only short-circuit
+option, the candidate miner, the command-line interface (`check`,
 `report`, `lint`, `card`), and the governance layer: a typed policy schema
 loadable from JSON (YAML with the optional extra), a control catalog
 crosswalked to NIST AI RMF, ISO/IEC 42001 and the EU AI Act, a policy lint
@@ -12,10 +13,6 @@ policy plus the ledger. What follows is the order things get added.
 
 ## Near term
 
-- **Block-only short-circuit.** A policy option that lets tier one decide a
-  block on its own but sends every allow to tier two. The benchmark in the
-  README shows why: all 16 cascade misses were tier-one allows that the model
-  never saw, and the model alone missed none of them.
 - **Async, off-path shadow sampling.** Today the shadow probe runs inline for
   simplicity. Move it to a background task so it never adds latency to a blocked
   request, and report the agreement rate over a sliding window rather than only
