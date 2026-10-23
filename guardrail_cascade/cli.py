@@ -83,6 +83,10 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     if spec is None:
         return 2
     prompts = read_prompts(stdin, args.single)
+    # Like --block-keyword, this lets a quick experiment try the stricter mode
+    # without editing the reviewed policy file.
+    if args.block_only:
+        spec.short_circuit_allow = False
     # Command-line keywords extend the policy's, so a quick experiment does not
     # require editing the reviewed file.
     keywords = list(spec.block_keywords) + (args.block_keyword or [])
@@ -217,6 +221,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="WORD",
         help="a tier-two block keyword for the offline stub provider (repeatable, adds to the policy's)",
+    )
+    check.add_argument(
+        "--block-only",
+        action="store_true",
+        help="escalate every tier-one allow to tier two; only blocks short-circuit",
     )
     check.add_argument("--claude", action="store_true", help="use a Claude model as tier two (calls the paid API)")
     check.add_argument("--model", default="claude-haiku-5-5", help="the model --claude uses (default: %(default)s)")

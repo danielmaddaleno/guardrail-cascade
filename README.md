@@ -89,8 +89,10 @@ Tier-two cost saved: $0.000081
 
 `--single` treats all of stdin as one prompt, and `--block-keyword WORD`
 (repeatable) configures the offline stub that stands in for the paid tier two.
-`--claude` uses a Claude model as tier two instead (`--model` picks which one),
-which calls the paid API.
+`--block-only` runs the stricter mode from the shell: every tier-one allow is
+sent to tier two and only blocks short-circuit, without having to write a policy
+file first. `--claude` uses a Claude model as tier two instead (`--model` picks
+which one), which calls the paid API.
 
 The governance layer is on the command line too:
 

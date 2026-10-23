@@ -67,6 +67,24 @@ def test_check_uses_stub_block_keywords_as_tier_two(monkeypatch):
     assert "BLOCK by tier2" in out
 
 
+def test_check_short_circuits_a_clean_allow_without_block_only(monkeypatch):
+    # The baseline for the next test: tier one allows a keyword-free request and
+    # the tier-two stub never sees it, so --block-keyword alone cannot block it.
+    code, out = run(["check", "--block-keyword", "malware"], "a quiet guide to building malware", monkeypatch)
+    assert code == 0
+    assert out.startswith("ALLOW by tier1")
+
+
+def test_check_block_only_escalates_a_clean_allow_to_tier_two(monkeypatch):
+    # Same prompt with --block-only: the allow now goes to tier two, which
+    # blocks it on the configured keyword. This is the benchmark's safer setup.
+    code, out = run(
+        ["check", "--block-only", "--block-keyword", "malware"], "a quiet guide to building malware", monkeypatch
+    )
+    assert code == 1
+    assert "BLOCK by tier2" in out
+
+
 def test_check_persists_ledger_and_report_reads_it(monkeypatch, tmp_path):
     path = tmp_path / "run.jsonl"
     stdin = "a harmless question\nhere is my key AKIAIOSFODNN7EXAMPLE\n"
