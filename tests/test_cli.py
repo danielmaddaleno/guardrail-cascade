@@ -255,6 +255,37 @@ def test_report_includes_shadow_metrics(monkeypatch, tmp_path):
     assert "Shadow agreement:    n/a" in out
 
 
+def test_report_json_emits_the_full_summary_object(monkeypatch, tmp_path):
+    path = tmp_path / "run.jsonl"
+    stdin = "a harmless question\nhere is my key AKIAIOSFODNN7EXAMPLE\n"
+    run(["check", "--ledger", str(path)], stdin, monkeypatch)
+
+    code, out = run(["report", "--json", str(path)], "", monkeypatch)
+    assert code == 0
+    data = json.loads(out)
+    assert data["ledger_file"] == str(path)
+    assert data["chain_valid"] is True
+    assert data["total"] == 2
+    assert data["blocked_by_tier1"] == 1
+    # Fields the text table never prints are still in the JSON a dashboard reads.
+    # Both prompts short-circuit at tier one (the allow and the block), so the
+    # count of tier-one decisions is 2.
+    assert data["decided_by_tier1"] == 2
+    assert "tier1_block_rate" in data and "shadow_agreements" in data
+
+
+def test_report_json_marks_a_tampered_chain_and_exits_one(monkeypatch, tmp_path):
+    path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(path)], "here is my key AKIAIOSFODNN7EXAMPLE", monkeypatch)
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    records[0]["action"] = "ALLOW"
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+    code, out = run(["report", "--json", str(path)], "", monkeypatch)
+    assert code == 1
+    assert json.loads(out)["chain_valid"] is False
+
+
 def test_two_check_runs_share_one_verifiable_ledger(monkeypatch, tmp_path):
     path = tmp_path / "run.jsonl"
     stdin = "a harmless question\nhere is my key AKIAIOSFODNN7EXAMPLE\n"

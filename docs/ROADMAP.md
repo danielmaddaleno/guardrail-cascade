@@ -5,7 +5,7 @@ the two-tier cascade, the four heuristic guardrails, the offline provider and a
 Claude provider, the hash-chained ledger with a cost, latency and
 shadow-agreement summary, the shadow sampler, the block-only short-circuit
 option, the candidate miner, the command-line interface (`check`,
-`report`, `lint`, `card`), and the governance layer: a typed policy schema
+`report` with a `--json` summary, `lint`, `card`), and the governance layer: a typed policy schema
 loadable from JSON (YAML with the optional extra), a control catalog
 crosswalked to NIST AI RMF, ISO/IEC 42001 and the EU AI Act, a policy lint
 gate wired into this repo's own CI, and a system card generated from the
@@ -24,8 +24,9 @@ policy plus the ledger. What follows is the order things get added.
 - **Redaction from a real toolkit.** Let tier one delegate to a dedicated
   guardrails library (for example llm-guardrails-toolkit) behind the `Guardrail`
   interface, instead of the built-in patterns.
-- **JSON report output.** `check --policy`, `lint` and `card` ship now; next is
-  `report --json` so the ledger summary feeds a dashboard directly.
+- **Live dashboard feed.** `report --json` ships now. The next step is a
+  `--watch` mode that re-reads a growing ledger and re-emits the summary, so a
+  dashboard can poll one long-running process instead of re-invoking the CLI.
 
 ## Medium term
 

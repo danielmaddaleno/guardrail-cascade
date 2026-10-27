@@ -85,6 +85,16 @@ Requests:            2
 Short-circuit rate:  100%
 Tier-two cost saved: $0.000081
 ...
+
+# report --json prints the whole summary as one object, so a dashboard reads
+# the numbers directly instead of parsing them back out of the table.
+$ guardrail-cascade report --json run.jsonl
+{
+  "ledger_file": "run.jsonl",
+  "chain_valid": true,
+  "total": 2,
+  ...
+}
 ```
 
 `--single` treats all of stdin as one prompt, and `--block-keyword WORD`

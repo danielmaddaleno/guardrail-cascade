@@ -16,7 +16,9 @@ prints one decision per prompt, and can persist the evidence ledger to a JSON
 Lines file, extending the chain of one that is already there. With ``--policy``
 the cascade is built from a reviewed policy file instead of the built-in
 defaults. ``report`` loads a ledger file, verifies the hash chain, and prints
-the aggregate summary. ``lint`` is the CI gate: it exits
+the aggregate summary as a table, or as one JSON object with ``--json`` so the
+numbers feed a dashboard without being scraped back out of the table. ``lint``
+is the CI gate: it exits
 1 when the policy is invalid or a required governance control is not satisfied,
 so a build fails the way it fails on a broken test. ``card`` renders the policy
 (and optionally a ledger) into a Markdown system card.
@@ -34,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from typing import Sequence, TextIO
 
 from guardrail_cascade.cascade import Tier
@@ -137,6 +140,13 @@ def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
         return 2
     ok = ledger.verify()
     summary = ledger.summary()
+    if args.json:
+        # The text table below hand-picks a subset of the summary; the JSON
+        # carries every field a dashboard might chart, with chain validity and
+        # the file it came from alongside it.
+        payload = {"ledger_file": args.ledger_file, "chain_valid": ok, **asdict(summary)}
+        stdout.write(json.dumps(payload, indent=2) + "\n")
+        return 0 if ok else 1
     agreement = "%.1f%%" % (summary.shadow_agreement_rate * 100.0) if summary.shadow_probes else "n/a"
     lines = [
         "Ledger file:         %s" % args.ledger_file,
@@ -236,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = sub.add_parser("report", help="summarize a ledger JSON Lines file")
     report.add_argument("ledger_file", help="path to a JSON Lines ledger written by `check --ledger`")
+    report.add_argument("--json", action="store_true", help="emit the whole summary as one JSON object for a dashboard")
     report.set_defaults(func=_cmd_report)
 
     lint = sub.add_parser("lint", help="fail (exit 1) when the policy misses a required governance control")
