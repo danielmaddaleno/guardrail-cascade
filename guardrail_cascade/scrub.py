@@ -17,40 +17,67 @@ not listed, and PII that has no shape at all such as a person's name, are not
 masked. Read it as a net with a known mesh, not as a guarantee, and add the
 shapes your own traffic carries.
 
-The patterns are intentionally independent of the detection heuristics: the log
-must be masked even when no PII guardrail is configured, so this net does not
-depend on which guardrails are in the tier. It is also the looser of the two on
-PII, without the checksum and context checks
-:class:`guardrail_cascade.heuristics.PIIGuard` applies, because masking a stray
-order id in a log costs less than forwarding one to a paid provider.
+Scrubbing runs on every ledger write regardless of which guardrails are in the
+tier, so the log is masked even when no PII guardrail is configured. On PII it
+is deliberately looser than :class:`guardrail_cascade.heuristics.PIIGuard`,
+without the checksum and context checks, because masking a stray order id in a
+log costs less than forwarding one to a paid provider. The secret shapes it
+masks are :data:`SECRET_SHAPES`, the same list the guard blocks on, so the two
+cannot drift apart.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
-_PATTERNS: list[tuple[re.Pattern, str]] = [
+
+@dataclass(frozen=True)
+class SecretShape:
+    """One credential shape, shared by the tier-one blocker and this scrubber.
+
+    ``name`` is the label :class:`guardrail_cascade.heuristics.SecretGuard`
+    reports when it blocks the shape. ``replacement`` is what the scrubber puts
+    in the log: ``[SECRET]`` for every shape except the AWS secret access key,
+    where the name that introduces the key is kept and only the value is masked.
+    """
+
+    name: str
+    pattern: re.Pattern[str]
+    replacement: str = "[SECRET]"
+
+
+# The credential shapes, defined once. The tier-one SecretGuard reads this list
+# to block them and the scrubber below reads it to mask them in the ledger, so a
+# shape added here lands in both places and a key the guard blocks can never be
+# one the log leaks (or the reverse).
+SECRET_SHAPES: tuple[SecretShape, ...] = (
+    SecretShape("aws_access_key_id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    SecretShape("github_token", re.compile(r"\bgh[oprsu]_[A-Za-z0-9]{36,}\b")),
+    SecretShape("openai_api_key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
+    SecretShape("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    SecretShape("stripe_key", re.compile(r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b")),
+    # Three base64url segments from the "eyJ" that every JWT header begins with,
+    # so an id or access token in a field does not survive.
+    SecretShape("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+")),
+    # An AWS secret access key is 40 unremarkable base64 characters, recognizable
+    # only next to the name that introduces it, which the replacement keeps.
+    SecretShape(
+        "aws_secret_access_key",
+        re.compile(r"((?i:\baws_?secret_?access_?key\b)\s*[=:]\s*[\"\']?)([A-Za-z0-9/+=]{40})"),
+        r"\g<1>[SECRET]",
+    ),
+    SecretShape("private_key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")),
+)
+
+# PII shapes, then every secret shape. scrub_text applies them in this order.
+_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[EMAIL]"),
     (re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"), "[PHONE]"),
     (re.compile(r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b"), "[SSN]"),
     (re.compile(r"\b(?:\d{4}[-.\s]?){3}\d{4}\b"), "[CARD]"),
-    (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "[SECRET]"),
-    (re.compile(r"\bgh[oprsu]_[A-Za-z0-9]{36,}\b"), "[SECRET]"),
-    (re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "[SECRET]"),
-    (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"), "[SECRET]"),
-    (re.compile(r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b"), "[SECRET]"),
-    # Three base64url segments starting from the "eyJ" that every JWT header
-    # begins with, so an id or access token in a field does not survive.
-    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"), "[SECRET]"),
-    # An AWS secret access key is 40 unremarkable base64 characters, so it is
-    # only recognizable next to the name that introduces it. The name is kept.
-    (
-        re.compile(r"((?i:\baws_?secret_?access_?key\b)\s*[=:]\s*[\"\']?)([A-Za-z0-9/+=]{40})"),
-        r"\g<1>[SECRET]",
-    ),
-    (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"), "[SECRET]"),
-]
+] + [(shape.pattern, shape.replacement) for shape in SECRET_SHAPES]
 
 
 def scrub_text(text: str) -> str:

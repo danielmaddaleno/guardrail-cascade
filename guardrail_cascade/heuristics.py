@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from guardrail_cascade.core import Action, CheckResult, Guardrail
+from guardrail_cascade.scrub import SECRET_SHAPES
 
 
 class SecretGuard(Guardrail):
@@ -29,28 +30,15 @@ class SecretGuard(Guardrail):
     value is never returned in the result, so the guard does not become a second
     place the secret leaks.
 
-    These shapes are kept in step with the secret patterns in
-    :mod:`guardrail_cascade.scrub`. The scrubber is the last line for the audit
-    log, but it only runs once an entry is being written: a key shape it knows
-    and this guard does not is one that gets forwarded to the paid tier before
-    anything masks it.
+    The shapes come from :data:`guardrail_cascade.scrub.SECRET_SHAPES`, the one
+    list the ledger scrubber masks too. The scrubber is the last line for the
+    audit log, but it only runs once an entry is being written: a shape it knew
+    and this guard did not would reach the paid tier before anything masked it.
+    Sharing the list is what keeps that gap from opening.
     """
 
-    PATTERNS = {
-        "aws_access_key_id": r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
-        "github_token": r"\bgh[oprsu]_[A-Za-z0-9]{36,}\b",
-        "openai_api_key": r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b",
-        "google_api_key": r"\bAIza[0-9A-Za-z_-]{35}\b",
-        "stripe_key": r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b",
-        "jwt": r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+",
-        # The 40 characters of an AWS secret key have no shape of their own, so
-        # the name that introduces them is part of the match.
-        "aws_secret_access_key": r"(?i:\baws_?secret_?access_?key\b)\s*[=:]\s*[\"\']?[A-Za-z0-9/+=]{40}",
-        "private_key": r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
-    }
-
     def __init__(self) -> None:
-        self._compiled = {name: re.compile(pattern) for name, pattern in self.PATTERNS.items()}
+        self._compiled = {shape.name: shape.pattern for shape in SECRET_SHAPES}
 
     def check(self, text: str) -> CheckResult:
         found = [name for name, pattern in self._compiled.items() if pattern.search(text)]

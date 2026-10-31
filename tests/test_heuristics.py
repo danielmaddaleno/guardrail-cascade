@@ -4,7 +4,7 @@ import pytest
 
 from guardrail_cascade.core import Action
 from guardrail_cascade.heuristics import PIIGuard, PromptInjectionGuard, SecretGuard, ToxicityGuard
-from guardrail_cascade.scrub import scrub_text
+from guardrail_cascade.scrub import SECRET_SHAPES, scrub_text
 
 JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r"
 AWS_SECRET = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
@@ -72,6 +72,12 @@ class TestSecretGuard:
         for secret in SECRET_SAMPLES:
             assert "[SECRET]" in scrub_text(secret)
             assert guard.check(secret).action is Action.BLOCK
+
+    def test_reads_the_shared_shape_list(self, guard):
+        # The guard and the scrubber block/mask the same credentials because
+        # they compile the same objects, not two copies that have to be synced.
+        assert list(guard._compiled) == [shape.name for shape in SECRET_SHAPES]
+        assert all(guard._compiled[shape.name] is shape.pattern for shape in SECRET_SHAPES)
 
     def test_blocks_private_key_header(self, guard):
         result = guard.check("-----BEGIN RSA PRIVATE KEY-----")
