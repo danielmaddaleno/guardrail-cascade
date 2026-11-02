@@ -95,6 +95,10 @@ $ guardrail-cascade report --json run.jsonl
   "total": 2,
   ...
 }
+
+# report --watch keeps one process reading the ledger and reprints the summary
+# as new entries land, so a dashboard polls this instead of re-running the CLI.
+$ guardrail-cascade report --watch --interval 5 run.jsonl
 ```
 
 `--single` treats all of stdin as one prompt, and `--block-keyword WORD`

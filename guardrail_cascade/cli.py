@@ -36,8 +36,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from dataclasses import asdict
-from typing import Sequence, TextIO
+from typing import Callable, Sequence, TextIO
 
 from guardrail_cascade.cascade import Tier
 from guardrail_cascade.governance import CONTROL_CATALOG, lint_policy, system_card
@@ -126,30 +127,23 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     return 1 if blocked_any else 0
 
 
-def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
-    try:
-        ledger = EvidenceLedger.load(args.ledger_file)
-    except FileNotFoundError:
-        sys.stderr.write(
-            "report: ledger file not found: %s\n"
-            "Write one first with `check --ledger %s`.\n" % (args.ledger_file, args.ledger_file)
-        )
-        return 2
-    except (OSError, json.JSONDecodeError) as exc:
-        sys.stderr.write("report: could not read ledger %s: %s\n" % (args.ledger_file, exc))
-        return 2
+def _format_report(ledger_file: str, ledger: EvidenceLedger, as_json: bool) -> tuple[str, bool]:
+    """Render a ledger summary as the JSON object or the text table.
+
+    Returns the text to print and whether the hash chain verified, so the
+    one-shot report and the ``--watch`` loop format a ledger the same way.
+    """
     ok = ledger.verify()
     summary = ledger.summary()
-    if args.json:
+    if as_json:
         # The text table below hand-picks a subset of the summary; the JSON
         # carries every field a dashboard might chart, with chain validity and
         # the file it came from alongside it.
-        payload = {"ledger_file": args.ledger_file, "chain_valid": ok, **asdict(summary)}
-        stdout.write(json.dumps(payload, indent=2) + "\n")
-        return 0 if ok else 1
+        payload = {"ledger_file": ledger_file, "chain_valid": ok, **asdict(summary)}
+        return json.dumps(payload, indent=2) + "\n", ok
     agreement = "%.1f%%" % (summary.shadow_agreement_rate * 100.0) if summary.shadow_probes else "n/a"
     lines = [
-        "Ledger file:         %s" % args.ledger_file,
+        "Ledger file:         %s" % ledger_file,
         "Chain valid:         %s" % ok,
         "Requests:            %d" % summary.total,
         "Allowed:             %d" % summary.allowed,
@@ -162,7 +156,73 @@ def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
         "Shadow probes:       %d" % summary.shadow_probes,
         "Shadow agreement:    %s" % agreement,
     ]
-    stdout.write("\n".join(lines) + "\n")
+    return "\n".join(lines) + "\n", ok
+
+
+def _poll_report(ledger_file: str, as_json: bool) -> str | None:
+    """Read and render the ledger once, or None if it cannot be read right now.
+
+    A file the writer has not created yet, or a line caught partway through an
+    append, is not a watch-ending error: return None and let the caller retry.
+    """
+    try:
+        rendered, _ = _format_report(ledger_file, EvidenceLedger.load(ledger_file), as_json)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return rendered
+
+
+def watch_report(
+    ledger_file: str,
+    stdout: TextIO,
+    *,
+    as_json: bool = False,
+    interval: float = 2.0,
+    sleeper: Callable[[float], None] = time.sleep,
+    max_polls: int | None = None,
+) -> int:
+    """Re-read a growing ledger and re-emit its summary whenever it changes.
+
+    One long-running process a dashboard can poll, instead of re-invoking the
+    CLI for each refresh. The ledger is re-read every *interval* seconds; the
+    summary prints on the first successful read and again each time it differs
+    from what was last shown, so an unchanged ledger is not reprinted. *sleeper*
+    and *max_polls* are injected for tests; the CLI leaves the loop unbounded
+    and stops on Ctrl-C.
+    """
+    last: str | None = None
+    polls = 0
+    try:
+        while max_polls is None or polls < max_polls:
+            rendered = _poll_report(ledger_file, as_json)
+            if rendered is not None and rendered != last:
+                stdout.write(rendered)
+                stdout.flush()
+                last = rendered
+            polls += 1
+            if max_polls is None or polls < max_polls:
+                sleeper(interval)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
+    if args.watch:
+        return watch_report(args.ledger_file, stdout, as_json=args.json, interval=args.interval)
+    try:
+        ledger = EvidenceLedger.load(args.ledger_file)
+    except FileNotFoundError:
+        sys.stderr.write(
+            "report: ledger file not found: %s\n"
+            "Write one first with `check --ledger %s`.\n" % (args.ledger_file, args.ledger_file)
+        )
+        return 2
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.stderr.write("report: could not read ledger %s: %s\n" % (args.ledger_file, exc))
+        return 2
+    rendered, ok = _format_report(args.ledger_file, ledger, args.json)
+    stdout.write(rendered)
     return 0 if ok else 1
 
 
@@ -247,6 +307,16 @@ def build_parser() -> argparse.ArgumentParser:
     report = sub.add_parser("report", help="summarize a ledger JSON Lines file")
     report.add_argument("ledger_file", help="path to a JSON Lines ledger written by `check --ledger`")
     report.add_argument("--json", action="store_true", help="emit the whole summary as one JSON object for a dashboard")
+    report.add_argument(
+        "--watch", action="store_true", help="keep re-reading the ledger and re-emit the summary as it grows"
+    )
+    report.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        metavar="SECONDS",
+        help="seconds between re-reads with --watch (default: %(default)s)",
+    )
     report.set_defaults(func=_cmd_report)
 
     lint = sub.add_parser("lint", help="fail (exit 1) when the policy misses a required governance control")

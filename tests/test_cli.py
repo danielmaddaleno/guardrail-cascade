@@ -6,6 +6,7 @@ import io
 import json
 
 from guardrail_cascade import cli
+from guardrail_cascade.ledger import EvidenceLedger
 from guardrail_cascade.providers import StubProvider
 
 
@@ -333,3 +334,89 @@ def test_check_claude_without_the_sdk_is_a_clean_error(monkeypatch, capsys):
     code, _ = run(["check", "--claude"], "hello", monkeypatch)
     assert code == 2
     assert "guardrail-cascade[claude]" in capsys.readouterr().err
+
+
+def _append_allow(path):
+    """Add one more verifiable ALLOW entry to an existing ledger file."""
+    EvidenceLedger(path=str(path)).append(
+        {"decided_by": "tier1", "action": "ALLOW", "allowed": True, "latency_ms": 1.0, "cost_saved": 0.0}
+    )
+
+
+def test_report_watch_reprints_the_summary_after_the_ledger_grows(tmp_path, monkeypatch):
+    path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(path)], "a harmless question", monkeypatch)
+
+    # The sleeper stands in for the wait between polls; use it to grow the
+    # ledger once, so the second poll sees a request that was not there before.
+    def grow(_interval):
+        if grow.calls == 0:
+            _append_allow(path)
+        grow.calls += 1
+
+    grow.calls = 0
+    out = io.StringIO()
+    code = cli.watch_report(str(path), out, interval=0, sleeper=grow, max_polls=2)
+
+    text = out.getvalue()
+    assert code == 0
+    assert text.count("Requests:") == 2  # one summary per poll, both printed
+    assert "Requests:            1" in text
+    assert "Requests:            2" in text
+
+
+def test_report_watch_does_not_reprint_an_unchanged_ledger(tmp_path, monkeypatch):
+    path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(path)], "a harmless question", monkeypatch)
+
+    out = io.StringIO()
+    code = cli.watch_report(str(path), out, interval=0, sleeper=lambda _i: None, max_polls=3)
+
+    assert code == 0
+    assert out.getvalue().count("Requests:") == 1  # printed once, then deduped
+
+
+def test_report_watch_waits_for_a_ledger_that_does_not_exist_yet(tmp_path, monkeypatch):
+    path = tmp_path / "later.jsonl"
+
+    # The file is absent on the first poll; the writer creates it before the
+    # second. A missing file must not end the watch.
+    def create(_interval):
+        if create.calls == 0:
+            run(["check", "--ledger", str(path)], "a harmless question", monkeypatch)
+        create.calls += 1
+
+    create.calls = 0
+    out = io.StringIO()
+    code = cli.watch_report(str(path), out, interval=0, sleeper=create, max_polls=2)
+
+    assert code == 0
+    assert "Requests:            1" in out.getvalue()
+
+
+def test_report_watch_emits_json_when_asked(tmp_path, monkeypatch):
+    path = tmp_path / "run.jsonl"
+    run(["check", "--ledger", str(path)], "a harmless question", monkeypatch)
+
+    out = io.StringIO()
+    code = cli.watch_report(str(path), out, as_json=True, interval=0, sleeper=lambda _i: None, max_polls=1)
+
+    assert code == 0
+    data = json.loads(out.getvalue())
+    assert data["total"] == 1
+    assert data["chain_valid"] is True
+
+
+def test_report_watch_flag_dispatches_to_the_watch_loop(tmp_path, monkeypatch):
+    path = tmp_path / "run.jsonl"
+    seen = {}
+
+    def fake_watch(ledger_file, stdout, *, as_json, interval):
+        seen.update(ledger_file=ledger_file, as_json=as_json, interval=interval)
+        return 0
+
+    monkeypatch.setattr(cli, "watch_report", fake_watch)
+    code, _ = run(["report", "--watch", "--interval", "0.5", "--json", str(path)], "", monkeypatch)
+
+    assert code == 0
+    assert seen == {"ledger_file": str(path), "as_json": True, "interval": 0.5}
