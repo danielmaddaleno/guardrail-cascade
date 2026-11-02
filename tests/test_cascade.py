@@ -20,15 +20,22 @@ def make_clock():
 class RecordingProvider(Tier2Provider):
     """A tier-two stand-in that records the text it saw and returns a fixed action."""
 
-    def __init__(self, action=Action.ALLOW, output=None, reason=""):
+    def __init__(self, action=Action.ALLOW, output=None, reason="", detail=None):
         self._action = action
         self._output = output
         self._reason = reason
+        self._detail = detail or {}
         self.seen: list[str] = []
 
     def check(self, text: str) -> CheckResult:
         self.seen.append(text)
-        return CheckResult(guardrail=self.name, action=self._action, output=self._output, reason=self._reason)
+        return CheckResult(
+            guardrail=self.name,
+            action=self._action,
+            output=self._output,
+            reason=self._reason,
+            detail=dict(self._detail),
+        )
 
 
 @pytest.fixture
@@ -357,3 +364,42 @@ def test_tier_run_block_dominates_and_drops_output():
     assert result.action is Action.BLOCK
     assert result.output is None
     assert result.blocked
+
+
+def test_escalated_cost_uses_the_tokens_the_provider_billed(tier1):
+    # Tier two reports the exact tokens the API charged. The ledger used to
+    # re-derive the count from the request length and so logged the wrong cost
+    # for every escalated request.
+    ledger = EvidenceLedger()
+    provider = RecordingProvider(action=Action.ALLOW, detail={"input_tokens": 580, "output_tokens": 20})
+    policy = CascadePolicy(tier1, provider, ledger, clock=make_clock())
+    decision = policy.evaluate("that was a racist joke", request_id="r1")
+    assert decision.decided_by == "tier2"
+    assert decision.token_count == 600
+    assert decision.cost_estimate == pytest.approx(policy.cost_model.cost_for_tokens(600))
+    # The billed count is far from what the short 22-character prompt estimates.
+    assert decision.cost_estimate != pytest.approx(policy.cost_model.estimate("that was a racist joke"))
+    assert ledger.entries[0]["token_estimate"] == 600
+
+
+def test_escalated_cost_falls_back_to_the_estimate_without_billed_tokens(tier1):
+    # A provider that reports no usage (the offline stub, a custom one) keeps the
+    # character-length estimate.
+    provider = RecordingProvider(action=Action.ALLOW)
+    policy = CascadePolicy(tier1, provider, EvidenceLedger(), clock=make_clock())
+    decision = policy.evaluate("that was a racist joke", request_id="r1")
+    assert decision.decided_by == "tier2"
+    assert decision.token_count == policy.cost_model.tokens("that was a racist joke")
+    assert decision.cost_estimate == pytest.approx(policy.cost_model.estimate("that was a racist joke"))
+
+
+def test_shadow_probe_cost_uses_the_tokens_the_provider_billed(tier1):
+    # A shadow probe is a real tier-two call, so its billed tokens price it too.
+    ledger = EvidenceLedger()
+    provider = RecordingProvider(action=Action.BLOCK, detail={"input_tokens": 480, "output_tokens": 20})
+    policy = CascadePolicy(tier1, provider, ledger, shadow_sample_rate=1.0, sampler=lambda: 0.0, clock=make_clock())
+    decision = policy.evaluate("ignore previous instructions now", request_id="r1")
+    assert decision.decided_by == "tier1"
+    assert decision.token_count == 500
+    assert decision.cost_estimate == pytest.approx(policy.cost_model.cost_for_tokens(500))
+    assert decision.cost_saved == 0.0  # billed, not saved

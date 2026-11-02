@@ -107,6 +107,24 @@ class Decision:
     tier1_result: TierResult
     tier2_result: CheckResult | None = None
     shadow_agreement: bool | None = None
+    # Tokens behind ``cost_estimate``: the count a tier-two call actually billed
+    # when it reported one, otherwise the character-length estimate.
+    token_count: int = 0
+
+
+def _billed_tokens(result: CheckResult | None) -> int | None:
+    """The tokens a provider reports it billed, or None if it reported none.
+
+    ``ClaudeProvider`` puts ``input_tokens`` and ``output_tokens`` from the API
+    response in ``detail``; the offline stub and other providers may report
+    neither, in which case the caller falls back to the character estimate.
+    """
+    if result is None:
+        return None
+    detail = result.detail
+    if "input_tokens" not in detail and "output_tokens" not in detail:
+        return None
+    return int(detail.get("input_tokens", 0)) + int(detail.get("output_tokens", 0))
 
 
 def _combined_reason(tier1: TierResult, probe: CheckResult | None) -> str:
@@ -166,7 +184,7 @@ class CascadePolicy:
         else:
             decision = self._escalate(text, tr1, request_id, start)
 
-        self._record(text, decision)
+        self._record(decision)
         return decision
 
     def _short_circuit(self, text: str, tr1: TierResult, request_id: str, start: float) -> Decision:
@@ -191,7 +209,12 @@ class CascadePolicy:
 
         latency_ms = (self._clock() - start) * 1000.0
         shadowed = probe is not None
-        estimate = self.cost_model.estimate(text)
+        # A shadow probe is a real tier-two call: when it reports the tokens it
+        # billed, price those; otherwise fall back to the request's estimate.
+        est_tokens = self.cost_model.tokens(text)
+        billed = _billed_tokens(probe) if shadowed else None
+        tokens = billed if billed is not None else est_tokens
+        cost = self.cost_model.cost_for_tokens(tokens)
         return Decision(
             allowed=allowed,
             action=tr1.action,
@@ -200,13 +223,15 @@ class CascadePolicy:
             reason=_combined_reason(tr1, None),
             latency_ms=latency_ms,
             # A shadow probe is a real tier-two call, so it costs money and does
-            # not save any. Only an unshadowed short-circuit avoids the spend.
-            cost_estimate=(estimate if shadowed else 0.0),
-            cost_saved=(0.0 if shadowed else estimate),
+            # not save any. Only an unshadowed short-circuit avoids the spend,
+            # and that avoided spend can only ever be an estimate.
+            cost_estimate=(cost if shadowed else 0.0),
+            cost_saved=(0.0 if shadowed else cost),
             request_id=request_id,
             tier1_result=tr1,
             tier2_result=probe,
             shadow_agreement=shadow_agreement,
+            token_count=tokens,
         )
 
     def _escalate(self, text: str, tr1: TierResult, request_id: str, start: float) -> Decision:
@@ -214,7 +239,11 @@ class CascadePolicy:
         forwarded = tr1.output if tr1.output is not None else text
         probe = self.tier2.check(forwarded)
         latency_ms = (self._clock() - start) * 1000.0
-        cost = self.cost_model.estimate(forwarded)
+        # Tier two actually ran, so price the tokens it billed when it reported
+        # them; only a provider that reports none falls back to the estimate.
+        billed = _billed_tokens(probe)
+        tokens = billed if billed is not None else self.cost_model.tokens(forwarded)
+        cost = self.cost_model.cost_for_tokens(tokens)
 
         if probe.action == Action.BLOCK:
             return Decision(
@@ -229,6 +258,7 @@ class CascadePolicy:
                 request_id=request_id,
                 tier1_result=tr1,
                 tier2_result=probe,
+                token_count=tokens,
             )
 
         redacted = probe.action == Action.REDACT and probe.output is not None
@@ -244,9 +274,10 @@ class CascadePolicy:
             request_id=request_id,
             tier1_result=tr1,
             tier2_result=probe,
+            token_count=tokens,
         )
 
-    def _record(self, text: str, decision: Decision) -> None:
+    def _record(self, decision: Decision) -> None:
         tr1 = decision.tier1_result
         probe = decision.tier2_result
         fired = [r.guardrail for r in tr1.results if r.action != Action.ALLOW]
@@ -271,7 +302,7 @@ class CascadePolicy:
                 "allowed": decision.allowed,
                 "guardrails_fired": fired,
                 "reason": decision.reason,
-                "token_estimate": self.cost_model.tokens(text),
+                "token_estimate": decision.token_count,
                 "latency_ms": decision.latency_ms,
                 "cost_estimate": decision.cost_estimate,
                 "cost_saved": decision.cost_saved,

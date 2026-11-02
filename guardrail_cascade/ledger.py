@@ -49,10 +49,13 @@ def _utc_now_iso() -> str:
 class CostModel:
     """A minimal price model for estimating and saving tier-two spend.
 
-    Tokens are approximated from character length (about four characters per
-    token), the same cheap heuristic the guardrails toolkit uses, so no
-    tokenizer dependency is pulled in. ``price_per_1k_tokens`` is the tier-two
-    provider's blended input price.
+    When a provider reports the tokens it actually billed, the cascade prices
+    those through :meth:`cost_for_tokens`. Only when no real count is available
+    (the offline stub, or the tier-two spend a short-circuit avoided without
+    ever calling the provider) does :meth:`estimate` approximate the count from
+    character length, about four characters per token, so no tokenizer
+    dependency is pulled in. ``price_per_1k_tokens`` is the tier-two provider's
+    blended price.
     """
 
     price_per_1k_tokens: float = 0.003
@@ -61,8 +64,12 @@ class CostModel:
     def tokens(self, text: str) -> int:
         return math.ceil(len(text) / self.chars_per_token)
 
+    def cost_for_tokens(self, tokens: int) -> float:
+        """Price a known token count. Used when a provider reports the real one."""
+        return tokens / 1000.0 * self.price_per_1k_tokens
+
     def estimate(self, text: str) -> float:
-        return self.tokens(text) / 1000.0 * self.price_per_1k_tokens
+        return self.cost_for_tokens(self.tokens(text))
 
 
 @dataclass

@@ -312,8 +312,11 @@ a signature). Adding one is on the roadmap.
 
 The default tier two is an offline stub for demos and tests. `ClaudeProvider`
 is the model-based one, and there is no labeled eval of its verdicts in the repo
-yet either. Token cost is estimated from character length,
-which is close enough for accounting but is not an exact tokenizer count.
+yet either. When tier two runs, the cost recorded is priced from the token
+counts the provider returns. The spend a short-circuit avoided, and any provider
+that reports no counts, fall back to a character-length estimate (about four
+characters per token), close enough for accounting but not an exact tokenizer
+count.
 
 ## Roadmap
 
