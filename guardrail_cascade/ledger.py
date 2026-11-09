@@ -94,6 +94,16 @@ class LedgerSummary:
     shadow_probes: int = 0
     shadow_agreements: int = 0
     shadow_agreement_rate: float = 0.0
+    # The cumulative rate above averages every probe since the ledger began, so
+    # a recent slide in tier-one quality is diluted by a long clean history and
+    # does not show. These recent_* fields repeat the agreement rate over only
+    # the last ``shadow_window`` probes, which is where drift surfaces first. The
+    # window is None unless :meth:`EvidenceLedger.summary` was asked for one, and
+    # then the recent figures equal the cumulative ones.
+    shadow_window: int | None = None
+    recent_shadow_probes: int = 0
+    recent_shadow_agreements: int = 0
+    recent_shadow_agreement_rate: float = 0.0
 
 
 def _percentile(values: list[float], pct: float) -> float:
@@ -213,7 +223,16 @@ class EvidenceLedger:
             prev_hash = record["entry_hash"]
         return True
 
-    def summary(self) -> LedgerSummary:
+    def summary(self, shadow_window: int | None = None) -> LedgerSummary:
+        """Aggregate the ledger. ``shadow_window`` bounds the recent agreement rate.
+
+        Everything except the recent_* fields is cumulative over the whole
+        ledger. When ``shadow_window`` is a positive int, the recent agreement
+        rate is computed over the last that-many probes, so a dashboard can watch
+        drift against the window instead of only the lifetime average; a value of
+        None (or not positive) leaves the recent figures equal to the cumulative
+        ones.
+        """
         total = len(self._entries)
         allowed = sum(1 for e in self._entries if e.get("allowed"))
         blocked_t1 = sum(1 for e in self._entries if not e.get("allowed") and e.get("decided_by") == "tier1")
@@ -223,9 +242,15 @@ class EvidenceLedger:
         decided_t1 = sum(1 for e in self._entries if e.get("decided_by") == "tier1")
         latencies = [float(e.get("latency_ms", 0.0)) for e in self._entries]
         # A probe happened wherever agreement was recorded at all; True/False is
-        # the verdict, None (or the key missing) means no probe was sent.
-        probes = sum(1 for e in self._entries if e.get("shadow_agreement") is not None)
-        agreements = sum(1 for e in self._entries if e.get("shadow_agreement") is True)
+        # the verdict, None (or the key missing) means no probe was sent. The
+        # verdicts stay in append order, so the tail is the most recent window.
+        verdicts = [e["shadow_agreement"] for e in self._entries if e.get("shadow_agreement") is not None]
+        probes = len(verdicts)
+        agreements = sum(1 for v in verdicts if v is True)
+        window = shadow_window if (shadow_window is not None and shadow_window > 0) else None
+        recent = verdicts[-window:] if window is not None else verdicts
+        recent_probes = len(recent)
+        recent_agreements = sum(1 for v in recent if v is True)
         return LedgerSummary(
             total=total,
             allowed=allowed,
@@ -241,4 +266,8 @@ class EvidenceLedger:
             shadow_probes=probes,
             shadow_agreements=agreements,
             shadow_agreement_rate=(agreements / probes if probes else 0.0),
+            shadow_window=window,
+            recent_shadow_probes=recent_probes,
+            recent_shadow_agreements=recent_agreements,
+            recent_shadow_agreement_rate=(recent_agreements / recent_probes if recent_probes else 0.0),
         )

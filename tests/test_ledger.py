@@ -123,6 +123,55 @@ def test_summary_of_empty_ledger_is_zeroed():
     assert summary.latency_p50_ms == 0.0
 
 
+def _with_shadow(ledger, verdicts):
+    """Append one short-circuit entry per verdict (True/False agreement, None unsampled)."""
+    for verdict in verdicts:
+        ledger.append({"allowed": True, "decided_by": "tier1", "shadow_agreement": verdict})
+
+
+def test_shadow_window_catches_recent_drift_the_lifetime_rate_hides(clock):
+    ledger = EvidenceLedger(now=clock)
+    # Four early probes agreed, then the last two disagreed: a fresh slide.
+    _with_shadow(ledger, [True, True, True, True, False, False])
+    summary = ledger.summary(shadow_window=2)
+    # Cumulative stays high and buries the slide.
+    assert summary.shadow_probes == 6
+    assert summary.shadow_agreement_rate == pytest.approx(4 / 6)
+    # The window of the last two probes shows it plainly.
+    assert summary.shadow_window == 2
+    assert summary.recent_shadow_probes == 2
+    assert summary.recent_shadow_agreements == 0
+    assert summary.recent_shadow_agreement_rate == 0.0
+
+
+def test_unsampled_requests_do_not_fill_the_window(clock):
+    ledger = EvidenceLedger(now=clock)
+    # Only three of these were probed; the Nones never went to tier two.
+    _with_shadow(ledger, [True, None, False, None, True])
+    summary = ledger.summary(shadow_window=2)
+    # The window counts probes, not requests: the last two probes are False, True.
+    assert summary.recent_shadow_probes == 2
+    assert summary.recent_shadow_agreements == 1
+    assert summary.recent_shadow_agreement_rate == pytest.approx(0.5)
+
+
+def test_no_window_leaves_recent_equal_to_cumulative(clock):
+    ledger = EvidenceLedger(now=clock)
+    _with_shadow(ledger, [True, False, True])
+    summary = ledger.summary()
+    assert summary.shadow_window is None
+    assert summary.recent_shadow_probes == summary.shadow_probes == 3
+    assert summary.recent_shadow_agreement_rate == summary.shadow_agreement_rate
+
+
+def test_window_wider_than_history_covers_every_probe(clock):
+    ledger = EvidenceLedger(now=clock)
+    _with_shadow(ledger, [True, False])
+    summary = ledger.summary(shadow_window=100)
+    assert summary.recent_shadow_probes == 2
+    assert summary.recent_shadow_agreement_rate == pytest.approx(0.5)
+
+
 def test_load_round_trips_and_preserves_the_chain(clock, tmp_path):
     path = tmp_path / "ledger.jsonl"
     original = EvidenceLedger(path=str(path), now=clock)

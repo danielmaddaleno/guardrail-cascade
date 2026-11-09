@@ -16,8 +16,9 @@ policy plus the ledger. What follows is the order things get added.
 
 - **Async, off-path shadow sampling.** Today the shadow probe runs inline for
   simplicity. Move it to a background task so it never adds latency to a blocked
-  request, and report the agreement rate over a sliding window rather than only
-  cumulatively.
+  request. The windowed view it was meant to feed is already here: `summary`
+  takes a `shadow_window` and `report --shadow-window N` prints the agreement
+  rate over the last N probes, where drift shows before the lifetime rate does.
 - **More provider adapters.** `ClaudeProvider` shipped. Next are a thin
   `BedrockProvider` around the AWS Bedrock Guardrails API and a local
   `LlamaGuardProvider`, behind the same `Tier2Provider` interface. Keep the

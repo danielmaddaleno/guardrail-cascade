@@ -127,14 +127,18 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     return 1 if blocked_any else 0
 
 
-def _format_report(ledger_file: str, ledger: EvidenceLedger, as_json: bool) -> tuple[str, bool]:
+def _format_report(
+    ledger_file: str, ledger: EvidenceLedger, as_json: bool, shadow_window: int | None = None
+) -> tuple[str, bool]:
     """Render a ledger summary as the JSON object or the text table.
 
     Returns the text to print and whether the hash chain verified, so the
     one-shot report and the ``--watch`` loop format a ledger the same way.
+    ``shadow_window`` bounds the recent agreement rate (see
+    :meth:`EvidenceLedger.summary`).
     """
     ok = ledger.verify()
-    summary = ledger.summary()
+    summary = ledger.summary(shadow_window)
     if as_json:
         # The text table below hand-picks a subset of the summary; the JSON
         # carries every field a dashboard might chart, with chain validity and
@@ -156,17 +160,24 @@ def _format_report(ledger_file: str, ledger: EvidenceLedger, as_json: bool) -> t
         "Shadow probes:       %d" % summary.shadow_probes,
         "Shadow agreement:    %s" % agreement,
     ]
+    # Only worth a second line when a window was asked for and the tail it names
+    # is shorter than the whole run; otherwise it just repeats the figure above.
+    if summary.shadow_window is not None and summary.recent_shadow_probes < summary.shadow_probes:
+        lines.append(
+            "Recent agreement:    %.1f%% (last %d)"
+            % (summary.recent_shadow_agreement_rate * 100.0, summary.recent_shadow_probes)
+        )
     return "\n".join(lines) + "\n", ok
 
 
-def _poll_report(ledger_file: str, as_json: bool) -> str | None:
+def _poll_report(ledger_file: str, as_json: bool, shadow_window: int | None = None) -> str | None:
     """Read and render the ledger once, or None if it cannot be read right now.
 
     A file the writer has not created yet, or a line caught partway through an
     append, is not a watch-ending error: return None and let the caller retry.
     """
     try:
-        rendered, _ = _format_report(ledger_file, EvidenceLedger.load(ledger_file), as_json)
+        rendered, _ = _format_report(ledger_file, EvidenceLedger.load(ledger_file), as_json, shadow_window)
     except (OSError, json.JSONDecodeError):
         return None
     return rendered
@@ -178,6 +189,7 @@ def watch_report(
     *,
     as_json: bool = False,
     interval: float = 2.0,
+    shadow_window: int | None = None,
     sleeper: Callable[[float], None] = time.sleep,
     max_polls: int | None = None,
 ) -> int:
@@ -194,7 +206,7 @@ def watch_report(
     polls = 0
     try:
         while max_polls is None or polls < max_polls:
-            rendered = _poll_report(ledger_file, as_json)
+            rendered = _poll_report(ledger_file, as_json, shadow_window)
             if rendered is not None and rendered != last:
                 stdout.write(rendered)
                 stdout.flush()
@@ -209,7 +221,9 @@ def watch_report(
 
 def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     if args.watch:
-        return watch_report(args.ledger_file, stdout, as_json=args.json, interval=args.interval)
+        return watch_report(
+            args.ledger_file, stdout, as_json=args.json, interval=args.interval, shadow_window=args.shadow_window
+        )
     try:
         ledger = EvidenceLedger.load(args.ledger_file)
     except FileNotFoundError:
@@ -221,7 +235,7 @@ def _cmd_report(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     except (OSError, json.JSONDecodeError) as exc:
         sys.stderr.write("report: could not read ledger %s: %s\n" % (args.ledger_file, exc))
         return 2
-    rendered, ok = _format_report(args.ledger_file, ledger, args.json)
+    rendered, ok = _format_report(args.ledger_file, ledger, args.json, args.shadow_window)
     stdout.write(rendered)
     return 0 if ok else 1
 
@@ -316,6 +330,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=2.0,
         metavar="SECONDS",
         help="seconds between re-reads with --watch (default: %(default)s)",
+    )
+    report.add_argument(
+        "--shadow-window",
+        type=int,
+        default=None,
+        metavar="N",
+        help="also report shadow agreement over the last N probes, where drift shows before the lifetime rate does",
     )
     report.set_defaults(func=_cmd_report)
 

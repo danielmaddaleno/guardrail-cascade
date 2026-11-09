@@ -256,6 +256,31 @@ def test_report_includes_shadow_metrics(monkeypatch, tmp_path):
     assert "Shadow agreement:    n/a" in out
 
 
+def test_report_shadow_window_prints_the_recent_rate(monkeypatch, tmp_path):
+    path = tmp_path / "run.jsonl"
+    ledger = EvidenceLedger(path=str(path))
+    # Early probes agreed, the last two disagreed: a recent slide.
+    for verdict in [True, True, True, True, False, False]:
+        ledger.append({"allowed": True, "decided_by": "tier1", "shadow_agreement": verdict})
+
+    code, out = run(["report", "--shadow-window", "2", str(path)], "", monkeypatch)
+    assert code == 0
+    # The lifetime figure stays high; the window of the last two probes is 0%.
+    assert "Shadow agreement:    66.7%" in out
+    assert "Recent agreement:    0.0% (last 2)" in out
+
+
+def test_report_without_a_window_omits_the_recent_line(monkeypatch, tmp_path):
+    path = tmp_path / "run.jsonl"
+    ledger = EvidenceLedger(path=str(path))
+    for verdict in [True, False]:
+        ledger.append({"allowed": True, "decided_by": "tier1", "shadow_agreement": verdict})
+
+    code, out = run(["report", str(path)], "", monkeypatch)
+    assert code == 0
+    assert "Recent agreement:" not in out
+
+
 def test_report_json_emits_the_full_summary_object(monkeypatch, tmp_path):
     path = tmp_path / "run.jsonl"
     stdin = "a harmless question\nhere is my key AKIAIOSFODNN7EXAMPLE\n"
@@ -411,12 +436,14 @@ def test_report_watch_flag_dispatches_to_the_watch_loop(tmp_path, monkeypatch):
     path = tmp_path / "run.jsonl"
     seen = {}
 
-    def fake_watch(ledger_file, stdout, *, as_json, interval):
-        seen.update(ledger_file=ledger_file, as_json=as_json, interval=interval)
+    def fake_watch(ledger_file, stdout, *, as_json, interval, shadow_window):
+        seen.update(ledger_file=ledger_file, as_json=as_json, interval=interval, shadow_window=shadow_window)
         return 0
 
     monkeypatch.setattr(cli, "watch_report", fake_watch)
-    code, _ = run(["report", "--watch", "--interval", "0.5", "--json", str(path)], "", monkeypatch)
+    code, _ = run(
+        ["report", "--watch", "--interval", "0.5", "--shadow-window", "50", "--json", str(path)], "", monkeypatch
+    )
 
     assert code == 0
-    assert seen == {"ledger_file": str(path), "as_json": True, "interval": 0.5}
+    assert seen == {"ledger_file": str(path), "as_json": True, "interval": 0.5, "shadow_window": 50}
