@@ -65,7 +65,11 @@ negatives on allows. `CascadePolicy` can send a configurable fraction of both
 kinds of short-circuit to tier two anyway (off the hot path in production) and
 record whether tier two agreed. A shadow probe is a real, billed tier-two call
 and it never changes the decision, only measures it, so the ledger books it as
-cost incurred, not cost saved. One exception: a block whose result is marked
+cost incurred, not cost saved. The probe runs after the tier-one verdict is
+fixed, so the latency the ledger records for a short-circuit is the decision
+time and leaves the probe out; otherwise turning sampling on would move the
+reported p50/p95 even though the serving path did not get slower. One
+exception: a block whose result is marked
 sensitive (a matched secret) is never shadowed, because forwarding the credential
 to the paid tier would defeat the block. A probe that is sent gets the text tier
 one redacted, not the raw request, since a block can still carry PII that a

@@ -190,6 +190,13 @@ class CascadePolicy:
     def _short_circuit(self, text: str, tr1: TierResult, request_id: str, start: float) -> Decision:
         """Decide with tier one alone, optionally shadow-probing tier two to audit it."""
         allowed = tr1.action == Action.ALLOW
+        # Tier one already fixed the verdict, so stop the latency clock here,
+        # before any shadow probe. The probe is a billed audit call that does
+        # not change the decision; folding its round-trip into the latency the
+        # ledger reports would make the p50/p95 jump whenever sampling is on,
+        # which is the opposite of what the metric is for. (The probe still runs
+        # synchronously below; the roadmap moves it off the request thread.)
+        latency_ms = (self._clock() - start) * 1000.0
         probe: CheckResult | None = None
         shadow_agreement: bool | None = None
         # Never forward a sensitive block (a matched secret) to the paid tier,
@@ -207,7 +214,6 @@ class CascadePolicy:
             else:
                 shadow_agreement = probe.action == Action.ALLOW
 
-        latency_ms = (self._clock() - start) * 1000.0
         shadowed = probe is not None
         # A shadow probe is a real tier-two call: when it reports the tokens it
         # billed, price those; otherwise fall back to the request's estimate.
