@@ -3,7 +3,8 @@
 Built incrementally, one small and defensible change at a time. Shipped so far:
 the two-tier cascade, the four heuristic guardrails, the offline provider and a
 Claude provider, the hash-chained ledger with a cost, latency and
-shadow-agreement summary, the shadow sampler, the block-only short-circuit
+shadow-agreement summary, the shadow sampler (inline or off-path through an
+injected executor), the block-only short-circuit
 option, the candidate miner, the command-line interface (`check`,
 `report` with a `--json` summary and a `--watch` mode that reprints as the
 ledger grows, `lint`, `card`), and the governance layer: a typed policy schema
@@ -14,11 +15,14 @@ policy plus the ledger. What follows is the order things get added.
 
 ## Near term
 
-- **Async, off-path shadow sampling.** Today the shadow probe runs inline for
-  simplicity. Move it to a background task so it never adds latency to a blocked
-  request. The windowed view it was meant to feed is already here: `summary`
-  takes a `shadow_window` and `report --shadow-window N` prints the agreement
-  rate over the last N probes, where drift shows before the lifetime rate does.
+- **Off-path shadow sampling.** Done at the library level: pass a
+  `shadow_executor` to `CascadePolicy` and the audit probe and its ledger write
+  run on that executor instead of the request thread, so sampling never holds
+  the caller for the paid round trip. The windowed view it feeds is here too:
+  `summary` takes a `shadow_window` and `report --shadow-window N` prints the
+  agreement rate over the last N probes, where drift shows before the lifetime
+  rate does. Left to do: surface it in the `check` CLI, which would need to drain
+  pending probes before the process exits.
 - **More provider adapters.** `ClaudeProvider` shipped. Next are a thin
   `BedrockProvider` around the AWS Bedrock Guardrails API and a local
   `LlamaGuardProvider`, behind the same `Tier2Provider` interface. Keep the

@@ -30,7 +30,7 @@ import random
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Protocol
 
 from guardrail_cascade.core import Action, CheckResult, Guardrail
 from guardrail_cascade.ledger import CostModel, EvidenceLedger
@@ -134,12 +134,32 @@ def _combined_reason(tier1: TierResult, probe: CheckResult | None) -> str:
     return "; ".join(parts)
 
 
+class ShadowExecutor(Protocol):
+    """The slice of ``concurrent.futures.Executor`` the cascade needs.
+
+    Only ``submit`` is used, so a real ``ThreadPoolExecutor`` satisfies this and
+    a test can pass a trivial stand-in that runs the probe when it chooses.
+    """
+
+    def submit(self, fn: Callable[..., object], *args: object) -> object: ...
+
+
 class CascadePolicy:
     """Orchestrates tier one, tier two, and the evidence ledger.
 
     ``sampler`` and ``clock`` are injected so tests are deterministic:
     ``sampler`` returns a float in ``[0, 1)`` and drives shadow sampling, and
     ``clock`` returns seconds for latency measurement.
+
+    By default a shadow probe runs inline on the request thread (it is excluded
+    from the reported latency, but it still delays the ledger write and holds the
+    caller until the paid round trip returns). Pass a ``shadow_executor`` to move
+    the probe and its ledger write off the request thread entirely: the decision
+    is returned before the probe runs, and the audited entry is appended from the
+    executor once it completes. The ledger already serializes appends across
+    threads, so a background probe writes a chain that still verifies. Drain the
+    executor (for example ``executor.shutdown(wait=True)``) before reading the
+    ledger to be sure every probe has landed.
     """
 
     def __init__(
@@ -153,6 +173,7 @@ class CascadePolicy:
         short_circuit_allow: bool = True,
         sampler: Callable[[], float] = random.random,
         clock: Callable[[], float] = time.monotonic,
+        shadow_executor: ShadowExecutor | None = None,
     ):
         self.tier1 = tier1
         self.tier2 = tier2
@@ -167,6 +188,8 @@ class CascadePolicy:
         self.short_circuit_allow = short_circuit_allow
         self._sampler = sampler
         self._clock = clock
+        # When set, shadow probes run here instead of inline (see class docstring).
+        self._shadow_executor = shadow_executor
 
     def _should_shadow(self) -> bool:
         if self.shadow_sample_rate <= 0.0:
@@ -180,32 +203,76 @@ class CascadePolicy:
 
         short_circuit = tr1.action == Action.BLOCK or (tr1.action == Action.ALLOW and self.short_circuit_allow)
         if short_circuit:
-            decision = self._short_circuit(text, tr1, request_id, start)
+            decision, deferred = self._short_circuit(text, tr1, request_id, start)
         else:
-            decision = self._escalate(text, tr1, request_id, start)
+            decision, deferred = self._escalate(text, tr1, request_id, start), False
 
-        self._record(decision)
+        # A deferred short-circuit hands recording to the executor thread, which
+        # appends the audited entry once the background probe lands.
+        if not deferred:
+            self._record(decision)
         return decision
 
-    def _short_circuit(self, text: str, tr1: TierResult, request_id: str, start: float) -> Decision:
-        """Decide with tier one alone, optionally shadow-probing tier two to audit it."""
-        allowed = tr1.action == Action.ALLOW
+    def _short_circuit(self, text: str, tr1: TierResult, request_id: str, start: float) -> tuple[Decision, bool]:
+        """Decide with tier one alone, optionally shadow-probing tier two to audit it.
+
+        Returns the decision and whether its recording was deferred. When a probe
+        is warranted and a ``shadow_executor`` was given, the probe and its ledger
+        write run on that executor, off the request thread; the returned decision
+        is then the pre-probe view, and ``shadow_agreement`` is filled in on the
+        recorded entry rather than on the value handed back. Without an executor
+        the probe runs inline, as before.
+        """
         # Tier one already fixed the verdict, so stop the latency clock here,
-        # before any shadow probe. The probe is a billed audit call that does
-        # not change the decision; folding its round-trip into the latency the
-        # ledger reports would make the p50/p95 jump whenever sampling is on,
-        # which is the opposite of what the metric is for. (The probe still runs
-        # synchronously below; the roadmap moves it off the request thread.)
+        # before any shadow probe. The probe is a billed audit call that does not
+        # change the decision; folding its round-trip into the reported latency
+        # would make the p50/p95 jump whenever sampling is on.
         latency_ms = (self._clock() - start) * 1000.0
-        probe: CheckResult | None = None
-        shadow_agreement: bool | None = None
         # Never forward a sensitive block (a matched secret) to the paid tier,
         # even for audit: the whole point of the block is to stop it propagating.
         sensitive = any(r.sensitive for r in tr1.results)
-        if self._should_shadow() and not sensitive:
-            # Probe with the redacted text. A block can still carry PII that a
-            # redactor already masked, and the probe must not undo that.
-            probe = self.tier2.check(tr1.masked if tr1.masked is not None else text)
+        if not (self._should_shadow() and not sensitive):
+            return self._short_circuit_decision(text, tr1, request_id, latency_ms, shadowed=False, probe=None), False
+        if self._shadow_executor is not None:
+            self._shadow_executor.submit(self._run_shadow_probe, text, tr1, request_id, latency_ms)
+            return self._short_circuit_decision(text, tr1, request_id, latency_ms, shadowed=True, probe=None), True
+        probe = self._shadow_probe(text, tr1)
+        return self._short_circuit_decision(text, tr1, request_id, latency_ms, shadowed=True, probe=probe), False
+
+    def _shadow_probe(self, text: str, tr1: TierResult) -> CheckResult:
+        """Run the audit probe against the redacted text.
+
+        A block can still carry PII that a redactor already masked, so the probe
+        sees ``masked`` and never undoes that masking for the paid tier.
+        """
+        return self.tier2.check(tr1.masked if tr1.masked is not None else text)
+
+    def _run_shadow_probe(self, text: str, tr1: TierResult, request_id: str, latency_ms: float) -> None:
+        """Probe and record the audited entry, off the request thread."""
+        probe = self._shadow_probe(text, tr1)
+        decision = self._short_circuit_decision(text, tr1, request_id, latency_ms, shadowed=True, probe=probe)
+        self._record(decision)
+
+    def _short_circuit_decision(
+        self,
+        text: str,
+        tr1: TierResult,
+        request_id: str,
+        latency_ms: float,
+        *,
+        shadowed: bool,
+        probe: CheckResult | None,
+    ) -> Decision:
+        """Build the tier-one decision, with or without the shadow probe filled in.
+
+        ``shadowed`` says a probe was or will be billed, so the avoided spend is
+        not credited as saved; ``probe`` is the result once it has run, or None
+        before it has (or when no probe was sampled). A probe that has run also
+        settles ``shadow_agreement``.
+        """
+        allowed = tr1.action == Action.ALLOW
+        shadow_agreement: bool | None = None
+        if probe is not None:
             # Agreement means tier two would have reached the same call: block a
             # block, or leave an allow untouched. Any other verdict on an allow
             # (a REDACT or FLAG) counts as disagreement, a caught tier-one miss.
@@ -213,12 +280,10 @@ class CascadePolicy:
                 shadow_agreement = probe.action == Action.BLOCK
             else:
                 shadow_agreement = probe.action == Action.ALLOW
-
-        shadowed = probe is not None
         # A shadow probe is a real tier-two call: when it reports the tokens it
         # billed, price those; otherwise fall back to the request's estimate.
         est_tokens = self.cost_model.tokens(text)
-        billed = _billed_tokens(probe) if shadowed else None
+        billed = _billed_tokens(probe) if probe is not None else None
         tokens = billed if billed is not None else est_tokens
         cost = self.cost_model.cost_for_tokens(tokens)
         return Decision(
