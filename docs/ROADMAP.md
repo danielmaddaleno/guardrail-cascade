@@ -21,8 +21,9 @@ policy plus the ledger. What follows is the order things get added.
   the caller for the paid round trip. The windowed view it feeds is here too:
   `summary` takes a `shadow_window` and `report --shadow-window N` prints the
   agreement rate over the last N probes, where drift shows before the lifetime
-  rate does. Left to do: surface it in the `check` CLI, which would need to drain
-  pending probes before the process exits.
+  rate does. Surfaced in the CLI too: `check --shadow-async` runs the audit
+  probes on a thread pool and drains them before the process exits, so a batch
+  screen does not stall on each paid probe in turn.
 - **More provider adapters.** `ClaudeProvider` shipped. Next are a thin
   `BedrockProvider` around the AWS Bedrock Guardrails API and a local
   `LlamaGuardProvider`, behind the same `Tier2Provider` interface. Keep the

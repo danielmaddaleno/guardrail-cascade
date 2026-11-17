@@ -145,6 +145,35 @@ def test_single_flag_treats_all_stdin_as_one_prompt(monkeypatch):
     assert out.count("\n") == 1
 
 
+def test_check_shadow_async_drains_probes_before_exit(monkeypatch, tmp_path):
+    # Every confident short-circuit is shadowed, and the probes run on the pool;
+    # the command must drain them so the ledger it leaves behind is complete.
+    policy = write_policy(tmp_path, shadow_sample_rate=1.0)
+    ledger_file = tmp_path / "run.jsonl"
+    code, out = run(
+        ["check", "--shadow-async", "--policy", policy, "--ledger", str(ledger_file)],
+        "what is the capital of France?\nhow do I bake bread?\n",
+        monkeypatch,
+    )
+    assert code == 0
+    assert out.count("ALLOW by tier1") == 2
+    entries = EvidenceLedger.load(str(ledger_file)).entries
+    assert len(entries) == 2
+    # The probe landed off-path for both, which only shows up once it is drained.
+    assert all(e["shadow_agreement"] is True and e["shadow"] is not None for e in entries)
+
+
+def test_check_shadow_async_json_pairs_each_entry_with_its_prompt(monkeypatch, tmp_path):
+    # A deferred allow probe can be appended after the inline secret block, so
+    # the JSON per prompt has to be matched by request id, not ledger position.
+    policy = write_policy(tmp_path, shadow_sample_rate=1.0)
+    stdin = "what is the capital of France?\nhere is my key AKIAIOSFODNN7EXAMPLE\n"
+    code, out = run(["check", "--shadow-async", "--json", "--policy", policy], stdin, monkeypatch)
+    assert code == 1
+    actions = [json.loads(line)["action"] for line in out.splitlines()]
+    assert actions == ["ALLOW", "BLOCK"]
+
+
 def write_policy(tmp_path, **overrides):
     """Write a valid policy file, with field overrides, and return its path."""
     data = {

@@ -141,7 +141,10 @@ class ShadowExecutor(Protocol):
     a test can pass a trivial stand-in that runs the probe when it chooses.
     """
 
-    def submit(self, fn: Callable[..., object], *args: object) -> object: ...
+    # fn is positional-only and kwargs are accepted, matching the real
+    # Executor.submit so a ThreadPoolExecutor is assignable here, not only the
+    # test stand-in.
+    def submit(self, fn: Callable[..., object], /, *args: object, **kwargs: object) -> object: ...
 
 
 class CascadePolicy:

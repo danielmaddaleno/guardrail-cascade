@@ -37,10 +37,11 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Callable, Sequence, TextIO
 
-from guardrail_cascade.cascade import Tier
+from guardrail_cascade.cascade import Decision, Tier
 from guardrail_cascade.governance import CONTROL_CATALOG, lint_policy, system_card
 from guardrail_cascade.ledger import EvidenceLedger
 from guardrail_cascade.policy import PolicySpec
@@ -82,6 +83,22 @@ def _load_policy(path: str | None) -> PolicySpec | None:
     return spec
 
 
+def _emit_decision(decision: Decision, entry: dict | None, as_json: bool, stdout: TextIO) -> None:
+    """Write one prompt's result: the scrubbed ledger entry as JSON, or a line.
+
+    ``entry`` is the recorded ledger entry for this decision, needed only for
+    ``--json``; the text line is built from the decision alone.
+    """
+    if as_json:
+        # The stored ledger entry is already PII-scrubbed and JSON-safe, so
+        # emitting it verbatim never leaks a raw secret the prompt carried.
+        stdout.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    else:
+        verdict = "ALLOW" if decision.allowed else "BLOCK"
+        reason = decision.reason or "(no signal fired)"
+        stdout.write("%-5s by %-6s  %s\n" % (verdict, decision.decided_by, reason))
+
+
 def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     spec = _load_policy(args.policy)
     if spec is None:
@@ -109,21 +126,32 @@ def _cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     except (OSError, ValueError) as exc:
         sys.stderr.write("ledger error: %s\n" % exc)
         return 2
-    policy = spec.build(tier2=tier2, ledger=ledger)
 
+    # With a shadow sample rate set, each confident short-circuit otherwise
+    # waits inline for the paid audit probe before the next prompt is screened.
+    # --shadow-async runs those probes on a thread pool instead, so screening
+    # does not stall on them; the pool is drained below before anything reads
+    # the ledger, so every deferred audit entry has landed.
+    executor = ThreadPoolExecutor(max_workers=4) if args.shadow_async else None
+    policy = spec.build(tier2=tier2, ledger=ledger, shadow_executor=executor)
+
+    try:
+        decisions = [policy.evaluate(prompt) for prompt in prompts]
+        if executor is not None:
+            executor.shutdown(wait=True)
+    finally:
+        # A probe that raised would otherwise leave the pool with live threads.
+        if executor is not None:
+            executor.shutdown(wait=True)
+
+    # A deferred probe appends its entry out of order, so pair each decision with
+    # its own entry by request id rather than by position.
+    by_id = {e.get("request_id"): e for e in ledger.entries} if args.json else {}
     blocked_any = False
-    for prompt in prompts:
-        decision = policy.evaluate(prompt)
+    for decision in decisions:
         if not decision.allowed:
             blocked_any = True
-        if args.json:
-            # The stored ledger entry is already PII-scrubbed and JSON-safe, so
-            # emitting it verbatim never leaks a raw secret the prompt carried.
-            stdout.write(json.dumps(ledger.entries[-1], ensure_ascii=False) + "\n")
-        else:
-            verdict = "ALLOW" if decision.allowed else "BLOCK"
-            reason = decision.reason or "(no signal fired)"
-            stdout.write("%-5s by %-6s  %s\n" % (verdict, decision.decided_by, reason))
+        _emit_decision(decision, by_id.get(decision.request_id), args.json, stdout)
     return 1 if blocked_any else 0
 
 
@@ -310,6 +338,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--block-only",
         action="store_true",
         help="escalate every tier-one allow to tier two; only blocks short-circuit",
+    )
+    check.add_argument(
+        "--shadow-async",
+        action="store_true",
+        help="run shadow audit probes on a thread pool instead of inline, draining them before exit",
     )
     check.add_argument("--claude", action="store_true", help="use a Claude model as tier two (calls the paid API)")
     check.add_argument("--model", default="claude-haiku-5-5", help="the model --claude uses (default: %(default)s)")

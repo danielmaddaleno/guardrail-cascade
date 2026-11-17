@@ -170,6 +170,11 @@ sensitive (a matched secret) is never shadowed, so the credential is not
 forwarded to the paid tier even for audit. A probe that does go out carries the
 text tier one already redacted, so a masked value is not un-masked on the way.
 
+In a server the probe runs off the request thread through an injected executor.
+A batch run gets the same with `check --shadow-async`, which screens every
+prompt without waiting on each audit probe and drains the pending ones before it
+exits, so the ledger it leaves is complete.
+
 ## Measured against a real tier two
 
 `examples/benchmark.py` sends 58 hand-labeled prompts through the cascade and

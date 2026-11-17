@@ -20,7 +20,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from guardrail_cascade.cascade import CascadePolicy, Tier
+from guardrail_cascade.cascade import CascadePolicy, ShadowExecutor, Tier
 from guardrail_cascade.core import Guardrail
 from guardrail_cascade.heuristics import PIIGuard, PromptInjectionGuard, SecretGuard, ToxicityGuard
 from guardrail_cascade.ledger import CostModel, EvidenceLedger
@@ -206,14 +206,18 @@ class PolicySpec:
         *,
         sampler: Callable[[], float] | None = None,
         clock: Callable[[], float] | None = None,
+        shadow_executor: ShadowExecutor | None = None,
     ) -> CascadePolicy:
         """Wire the whole cascade this spec describes and return it ready to serve.
 
         ``tier2`` defaults to the offline :class:`StubProvider` configured with
         the spec's ``block_keywords``, so a policy file alone yields a runnable,
         credential-free cascade; a real deployment passes its provider adapter.
-        Raises ``ValueError`` when :meth:`validate` finds problems, so an
-        invalid policy cannot be deployed by accident.
+        A ``shadow_executor`` is passed straight through to
+        :class:`~guardrail_cascade.cascade.CascadePolicy` so a caller that wants
+        off-path audit probes does not have to reach past the spec to build the
+        cascade by hand. Raises ``ValueError`` when :meth:`validate` finds
+        problems, so an invalid policy cannot be deployed by accident.
         """
         problems = self.validate()
         if problems:
@@ -223,6 +227,8 @@ class PolicySpec:
             extras["sampler"] = sampler
         if clock is not None:
             extras["clock"] = clock
+        if shadow_executor is not None:
+            extras["shadow_executor"] = shadow_executor
         return CascadePolicy(
             self.build_tier1(),
             tier2 if tier2 is not None else StubProvider(block_keywords=list(self.block_keywords)),
