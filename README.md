@@ -159,7 +159,23 @@ reason is built from the category, so the model's prose never reaches the log. A
 model refusal counts as a block, and an API error or an unusable answer fails
 closed unless `fail_open` is set. On Haiku a check costs about 600 input tokens
 and adds one to two seconds to an escalated request.
-Adapters for AWS Bedrock Guardrails and Llama Guard are still on the roadmap.
+
+`BedrockProvider` is the second real adapter (`pip install
+"guardrail-cascade[bedrock]"`). It applies a guardrail you have already
+configured in AWS Bedrock and reads back the verdict: an intervention is a
+block, no intervention an allow. The ledger category is built from the policy
+types and configured names that fired (a content filter type, a denied topic, a
+PII type), never the matched span, so a flagged value stays out of the log. It
+fails closed on an API error the same way, and `fail_open=True` turns that into
+a FLAG.
+
+```python
+from guardrail_cascade import BedrockProvider
+
+tier2 = BedrockProvider("your-guardrail-id", guardrail_version="1")
+```
+
+A Llama Guard adapter is still on the roadmap.
 
 The tradeoff of short-circuiting a confident allow is that a tier-one false
 negative passes without a second opinion. Shadow sampling is the answer: tier
@@ -270,7 +286,7 @@ the card says so itself.
 guardrail_cascade/
   core.py         # Action, CheckResult, the Guardrail interface
   heuristics.py   # tier-one guardrails: secrets, injection, PII, toxicity
-  providers.py    # Tier2Provider interface, ClaudeProvider, offline StubProvider
+  providers.py    # Tier2Provider interface, ClaudeProvider, BedrockProvider, offline StubProvider
   cascade.py      # Tier combination + CascadePolicy orchestrator
   ledger.py       # EvidenceLedger, CostModel, LedgerSummary
   scrub.py        # PII/secret masking applied to every ledger entry
@@ -325,8 +341,8 @@ count.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Highlights: more provider adapters
-(Bedrock, Llama Guard), async off-path shadow sampling, a signed or published ledger head
+See [docs/ROADMAP.md](docs/ROADMAP.md). Highlights: a Llama Guard provider
+adapter, async off-path shadow sampling, a signed or published ledger head
 hash, a ledger report renderer, and a learned tier 1.5 trained on tier-two
 labels plus shadow-sampled allows.
 

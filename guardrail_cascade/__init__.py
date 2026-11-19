@@ -26,7 +26,7 @@ from guardrail_cascade.heuristics import (
 )
 from guardrail_cascade.ledger import CostModel, EvidenceLedger, LedgerSummary
 from guardrail_cascade.policy import DEFAULT_GUARDRAILS, GUARDRAIL_REGISTRY, PolicySpec, register_guardrail
-from guardrail_cascade.providers import ClaudeProvider, StubProvider, Tier2Provider
+from guardrail_cascade.providers import BedrockProvider, ClaudeProvider, StubProvider, Tier2Provider
 from guardrail_cascade.scrub import scrub
 
 __all__ = [
@@ -43,6 +43,7 @@ __all__ = [
     "Tier2Provider",
     "StubProvider",
     "ClaudeProvider",
+    "BedrockProvider",
     "SecretGuard",
     "PromptInjectionGuard",
     "PIIGuard",

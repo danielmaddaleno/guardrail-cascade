@@ -5,8 +5,9 @@ block, so this is the expensive stage we are trying to hit less often. The
 provider is an interface with a single method, so a real deployment can drop in
 a model, AWS Bedrock Guardrails, Llama Guard, or an internal service without
 touching the cascade. :class:`ClaudeProvider` asks a Claude model through the
-Anthropic API. :class:`StubProvider` is a deterministic, offline stand-in so the
-whole pipeline runs in CI with no credentials.
+Anthropic API, :class:`BedrockProvider` applies an AWS Bedrock guardrail, and
+:class:`StubProvider` is a deterministic, offline stand-in so the whole pipeline
+runs in CI with no credentials.
 """
 
 from __future__ import annotations
@@ -191,6 +192,121 @@ class ClaudeProvider(Tier2Provider):
 
     def _unavailable(self, error: str) -> CheckResult:
         detail = {"error": error, "model": self.model}
+        if self.fail_open:
+            return CheckResult(
+                guardrail=self.name,
+                action=Action.FLAG,
+                reason="tier-two provider unavailable, failed open",
+                detail=detail,
+            )
+        return CheckResult(
+            guardrail=self.name,
+            action=Action.BLOCK,
+            reason="tier-two provider unavailable, failed closed",
+            detail=detail,
+        )
+
+
+class BedrockProvider(Tier2Provider):
+    """Tier two backed by an AWS Bedrock guardrail (the ApplyGuardrail API).
+
+    Needs the optional extra (``pip install "guardrail-cascade[bedrock]"``) and
+    the usual AWS credentials in the environment. It sends the text to a
+    guardrail you have already configured in Bedrock and reads back the verdict:
+    an intervention is a BLOCK, no intervention an ALLOW. The ledger category is
+    built from the policy types and configured names that fired, never from the
+    matched span, so a flagged value does not reach the log.
+
+    Fails closed with a BLOCK when the API cannot be reached or answers with an
+    action it does not recognise; ``fail_open=True`` lets the request through as
+    a FLAG instead, which still shows up in the ledger.
+    """
+
+    def __init__(
+        self,
+        guardrail_id: str,
+        *,
+        guardrail_version: str = "DRAFT",
+        source: str = "INPUT",
+        region_name: str | None = None,
+        fail_open: bool = False,
+        client: Any = None,
+    ):
+        try:
+            import boto3
+            from botocore.exceptions import BotoCoreError, ClientError
+        except ImportError as exc:
+            raise ImportError(
+                'BedrockProvider needs the boto3 package: pip install "guardrail-cascade[bedrock]"'
+            ) from exc
+        self.client: Any = client if client is not None else boto3.client("bedrock-runtime", region_name=region_name)
+        self._boto_errors = (BotoCoreError, ClientError)
+        self.guardrail_id = guardrail_id
+        self.guardrail_version = guardrail_version
+        self.source = source
+        self.fail_open = fail_open
+
+    def check(self, text: str) -> CheckResult:
+        try:
+            response = self.client.apply_guardrail(
+                guardrailIdentifier=self.guardrail_id,
+                guardrailVersion=self.guardrail_version,
+                source=self.source,
+                content=[{"text": {"text": text}}],
+            )
+        except self._boto_errors as exc:
+            return self._unavailable(type(exc).__name__)
+
+        action = response.get("action")
+        if action == "NONE":
+            return CheckResult(guardrail=self.name, action=Action.ALLOW, detail={"guardrail_id": self.guardrail_id})
+        if action == "GUARDRAIL_INTERVENED":
+            category = self._category(response)
+            return CheckResult(
+                guardrail=self.name,
+                action=Action.BLOCK,
+                reason="tier-two guardrail intervened: %s" % category,
+                detail={"category": category, "guardrail_id": self.guardrail_id},
+            )
+        return self._unavailable("unexpected_action:%s" % action)
+
+    @staticmethod
+    def _category(response: dict) -> str:
+        """Name what tripped the guardrail from the policy types and labels alone.
+
+        Reads filter types, denied-topic names, PII types, regex names and
+        managed word-list types. The ``match`` fields, which hold the offending
+        span itself, are left out on purpose: the detail is written to the
+        ledger, and the span is what must not land there.
+        """
+        cats: list[str] = []
+        for assessment in response.get("assessments", []):
+            if not isinstance(assessment, dict):
+                continue
+            for f in assessment.get("contentPolicy", {}).get("filters", []):
+                if f.get("type"):
+                    cats.append(str(f["type"]).lower())
+            for t in assessment.get("topicPolicy", {}).get("topics", []):
+                if t.get("name"):
+                    cats.append(str(t["name"]))
+            sip = assessment.get("sensitiveInformationPolicy", {})
+            for entity in sip.get("piiEntities", []):
+                if entity.get("type"):
+                    cats.append(str(entity["type"]).lower())
+            for regex in sip.get("regexes", []):
+                if regex.get("name"):
+                    cats.append(str(regex["name"]))
+            word_policy = assessment.get("wordPolicy", {})
+            for managed in word_policy.get("managedWordLists", []):
+                if managed.get("type"):
+                    cats.append(str(managed["type"]).lower())
+            if word_policy.get("customWords"):
+                cats.append("custom_word")
+        deduped = list(dict.fromkeys(cats))
+        return ", ".join(deduped) if deduped else "intervened"
+
+    def _unavailable(self, error: str) -> CheckResult:
+        detail = {"error": error, "guardrail_id": self.guardrail_id}
         if self.fail_open:
             return CheckResult(
                 guardrail=self.name,

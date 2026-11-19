@@ -24,10 +24,11 @@ policy plus the ledger. What follows is the order things get added.
   rate does. Surfaced in the CLI too: `check --shadow-async` runs the audit
   probes on a thread pool and drains them before the process exits, so a batch
   screen does not stall on each paid probe in turn.
-- **More provider adapters.** `ClaudeProvider` shipped. Next are a thin
-  `BedrockProvider` around the AWS Bedrock Guardrails API and a local
-  `LlamaGuardProvider`, behind the same `Tier2Provider` interface. Keep the
-  offline stub as the default so CI stays credential-free.
+- **More provider adapters.** `ClaudeProvider` and `BedrockProvider` shipped;
+  the latter is a thin wrapper over the AWS Bedrock ApplyGuardrail API that maps
+  an intervention to a block. Next is a local `LlamaGuardProvider`, behind the
+  same `Tier2Provider` interface. The offline stub stays the default so CI
+  stays credential-free.
 - **Redaction from a real toolkit.** Let tier one delegate to a dedicated
   guardrails library (for example llm-guardrails-toolkit) behind the `Guardrail`
   interface, instead of the built-in patterns.
