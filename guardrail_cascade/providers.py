@@ -31,6 +31,32 @@ class Tier2Provider(ABC):
         """Return a verdict for *text*. Blocks are the expensive catches."""
         raise NotImplementedError
 
+    # A provider that reaches a backend fails closed: unreachable means BLOCK,
+    # never a silent pass. Flip one provider with fail_open. The default lives
+    # on the interface so a new adapter inherits it rather than restating it.
+    fail_open: bool = False
+
+    def _unavailable_result(self, detail: dict) -> CheckResult:
+        """Verdict for a backend that could not be reached or parsed.
+
+        BLOCK by default, or FLAG when ``fail_open`` is set; *detail* is written
+        to the ledger either way. The Claude and Bedrock adapters carried this
+        branch verbatim, so it sits here instead of being copied a third time.
+        """
+        if self.fail_open:
+            return CheckResult(
+                guardrail=self.name,
+                action=Action.FLAG,
+                reason="tier-two provider unavailable, failed open",
+                detail=detail,
+            )
+        return CheckResult(
+            guardrail=self.name,
+            action=Action.BLOCK,
+            reason="tier-two provider unavailable, failed closed",
+            detail=detail,
+        )
+
 
 class StubProvider(Tier2Provider):
     """Deterministic offline provider used for demos and tests.
@@ -191,20 +217,7 @@ class ClaudeProvider(Tier2Provider):
         return None
 
     def _unavailable(self, error: str) -> CheckResult:
-        detail = {"error": error, "model": self.model}
-        if self.fail_open:
-            return CheckResult(
-                guardrail=self.name,
-                action=Action.FLAG,
-                reason="tier-two provider unavailable, failed open",
-                detail=detail,
-            )
-        return CheckResult(
-            guardrail=self.name,
-            action=Action.BLOCK,
-            reason="tier-two provider unavailable, failed closed",
-            detail=detail,
-        )
+        return self._unavailable_result({"error": error, "model": self.model})
 
 
 class BedrockProvider(Tier2Provider):
@@ -306,17 +319,4 @@ class BedrockProvider(Tier2Provider):
         return ", ".join(deduped) if deduped else "intervened"
 
     def _unavailable(self, error: str) -> CheckResult:
-        detail = {"error": error, "guardrail_id": self.guardrail_id}
-        if self.fail_open:
-            return CheckResult(
-                guardrail=self.name,
-                action=Action.FLAG,
-                reason="tier-two provider unavailable, failed open",
-                detail=detail,
-            )
-        return CheckResult(
-            guardrail=self.name,
-            action=Action.BLOCK,
-            reason="tier-two provider unavailable, failed closed",
-            detail=detail,
-        )
+        return self._unavailable_result({"error": error, "guardrail_id": self.guardrail_id})

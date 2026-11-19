@@ -2,8 +2,18 @@
 
 import pytest
 
-from guardrail_cascade.core import Action
+from guardrail_cascade.core import Action, CheckResult
 from guardrail_cascade.providers import StubProvider, Tier2Provider
+
+
+class _FlakyProvider(Tier2Provider):
+    """A provider whose backend is always unreachable, for the shared path."""
+
+    def __init__(self, fail_open: bool = False):
+        self.fail_open = fail_open
+
+    def check(self, text: str) -> CheckResult:
+        return self._unavailable_result({"error": "backend_down"})
 
 
 def test_stub_blocks_on_configured_keyword():
@@ -35,3 +45,16 @@ def test_stub_is_a_tier2_provider():
 def test_tier2_provider_cannot_be_instantiated_directly():
     with pytest.raises(TypeError):
         Tier2Provider()
+
+
+def test_a_new_provider_inherits_the_fail_closed_default():
+    result = _FlakyProvider().check("hello")
+    assert result.action is Action.BLOCK
+    assert "failed closed" in result.reason
+    assert result.detail["error"] == "backend_down"
+
+
+def test_a_new_provider_can_opt_into_failing_open():
+    result = _FlakyProvider(fail_open=True).check("hello")
+    assert result.action is Action.FLAG
+    assert "failed open" in result.reason
